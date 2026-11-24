@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#FDF8EE">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <title>小作家故事本</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/shelf.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/icon.svg" alt="" class="brand-icon" width="40" height="40">
+        <div>
+          <h1 class="brand-title">小作家故事本</h1>
+          <p class="brand-sub">点一下就开讲 · 不用按住 · 自动留住声音和文字</p>
+        </div>
+      </div>
+      <div class="stats-pill" id="statsPill" aria-live="polite">
+        <span class="stats-num" id="noteCountNum">0</span>
+        <span class="stats-label">篇故事</span>
+      </div>
+    </header>
+
+    <div id="httpsWarning" class="warning-banner" hidden>
+      <strong>需要通过 HTTPS 地址打开才能使用平板麦克风：</strong>
+      <span>当前不是安全连接（HTTPS），安卓浏览器会屏蔽录音权限。请改用 Tailscale HTTPS 链接访问。</span>
+    </div>
+
+    <div id="toastBanner" class="toast-banner" hidden></div>
+
+    <main class="desk-grid">
+      <!-- Left / Top: Hands-Free Recording Studio -->
+      <section class="studio-card" id="studioCard" aria-label="讲故事录音台">
+        <div class="studio-status-row">
+          <span class="status-badge" id="studioBadge">准备开讲</span>
+          <span class="timer-display" id="timerDisplay">00:00</span>
+        </div>
+
+        <div class="hero-action-wrap">
+          <button type="button" class="record-toggle-btn" id="recordToggleBtn" aria-pressed="false">
+            <span class="record-btn-ring" aria-hidden="true"></span>
+            <span class="record-btn-inner">
+              <span class="record-icon" id="recordBtnIcon" aria-hidden="true">🎙️</span>
+              <span class="record-main-label" id="recordBtnLabel">点一下开始讲</span>
+              <span class="record-sub-label" id="recordBtnSub">手可以放开 · 想多久都不会断</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="wave-box" id="waveBox" aria-hidden="true">
+          <div class="wave-bars" id="waveBars">
+            <span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <div class="live-paper" id="livePaper">
+          <div class="live-paper-header">
+            <span>📝 正在变成文字</span>
+            <button type="button" class="cancel-rec-btn" id="cancelRecBtn" hidden>✖ 这次不算</button>
+          </div>
+          <div class="live-paper-body" id="liveTranscriptBox">
+            <p class="live-placeholder">点上面的大红按钮，开口讲你的故事吧！停下来想一想也没关系。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right / Bottom: Story Notes Shelf -->
+      <section class="shelf-section" aria-label="我的故事笔记">
+        <div class="shelf-header">
+          <h2 class="shelf-title">📖 我的故事笔记</h2>
+        </div>
+
+        <div id="emptyShelf" class="empty-shelf">
+          <div class="empty-emoji" aria-hidden="true">🦖 🚀 🏰</div>
+          <p class="empty-title">还没有故事笔记呢</p>
+          <p class="empty-desc">讲完第一段故事，录音和文字就会一起存到这里！</p>
+        </div>
+
+        <div id="notesList" class="notes-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Parent Edit Modal -->
+  <dialog id="editDialog" class="edit-dialog">
+    <form method="dialog" class="edit-form" id="editForm">
+      <div class="edit-header">
+        <h3>编辑故事文字</h3>
+        <button type="button" class="icon-close-btn" id="closeEditBtn" aria-label="关闭">✕</button>
+      </div>
+      <label class="field-label" for="editTitleInput">故事标题</label>
+      <input id="editTitleInput" class="field-input" type="text" maxlength="40" placeholder="故事名字">
+      <label class="field-label" for="editTextInput">故事内容</label>
+      <textarea id="editTextInput" class="field-textarea" rows="8" placeholder="故事文字内容"></textarea>
+      <div class="edit-actions">
+        <button type="button" class="btn-secondary" id="cancelEditBtn">取消</button>
+        <button type="submit" class="btn-primary" id="saveEditBtn">保存修改</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/recorder.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
