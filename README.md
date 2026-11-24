@@ -1,25 +1,18 @@
-# 小作家故事本 (`story-note`)
+# 小作家故事本 (`com.luna.storynote`)
 
-专为 7 岁不识字小朋友设计的免按住长语音写书/记故事应用（适配安卓平板浏览器 & PWA 主屏安装）：
+独立运行的原生 Android 应用（Kotlin + Jetpack Compose，适配手机竖屏与安卓平板横屏双栏），专为 7 岁不识字小朋友免按住讲故事写书设计：
 
-- **点一下开讲，再点一下保存**：无需按住屏幕，开启录音期间自动申请平板 `Screen Wake Lock` 常亮防息屏断麦，含 850ms 防兴奋连点误触保护。
-- **原声 + 文字双留存**：
-  - 每一篇独立保存在 `data/notes/<YYYYMMDD-HHMMSS-id>/` 下：
-    - `audio.wav`（16kHz 单声道 16-bit 连续无损原声，支持浏览器拖动进度回听与 Finder 直接播放）
-    - `note.md`（带 YAML 头信息的 Markdown 故事稿，方便归档、打印成册或导入笔记软件）
-    - `meta.json`（故事序号、贴纸图标、时长与时间信息）
-- **豆包 Frontier 零密钥流式语音识别（突破单次 ~200s 限制）**：
-  - 实测豆包输入法接口支持 45 秒以上长静音思考不断连，但单次 `StartSession` 约 200 秒封顶。
-  - `RollingDoubaoTranscriber` 将连续录音与识别会话解耦：满 120 秒遇到换气停顿（或满 165 秒安全线）自动内存缓冲无缝切换新会话拼接文本，并支持对已保存的 `audio.wav` 一键重新分段识别。
+- **点一下开始讲、再点一下保存**：解放双手，录制期间自动持有屏幕常亮与 `PARTIAL_WAKE_LOCK` 防锁屏断麦，含 `850ms` 防连点误触保护与 16 柱实时声波反馈。
+- **豆包输入法接口零密钥长语音识别（突破 ~200s 单次上限）**：
+  - 本地独立完成虚拟设备注册与 `Frontier` WebSocket 协议交互，无需电脑后台服务。
+  - `RollingDoubaoTranscriber` 在满 120s 遇到 0.45s 换气停顿（或满 165s 安全线）自动收尾切换新会话无缝拼接，同时支持对着已存 `audio.wav` 本地一键重新识别。
+- **原声 + Markdown 双留存与系统分享**：
+  - 每篇故事独立保存在应用外部文件目录 `notes/<时间戳-id>/`（含 16kHz 单声道无损 `audio.wav`、`note.md`、`meta.json`），支持贴纸标记、进度条回听、家长改字及系统一键分享。
 
-## 启动与安卓平板访问
+## 本地编译 APK
 
 ```bash
-# 1. 启动本地服务（默认监听 127.0.0.1:8788）
-python3 ~/fun/story-note/server/app.py --port 8788
-
-# 2. 通过 Tailscale Serve 暴露可信 HTTPS 地址（安卓浏览器获取麦克风权限必须走 HTTPS）
-preview --port 8788
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+cd ~/fun/story-note
+./gradlew assembleRelease testDebugUnitTest
 ```
-
-在安卓平板 Chrome 打开输出的 `https://...ts.net` 地址，点击右上角菜单 **「添加到主屏幕」** 即可全屏独立使用。
