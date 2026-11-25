@@ -4,39 +4,72 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
+import com.luna.storynote.audio.FrontierProtocol
+import com.luna.storynote.audio.WavAudioFiles
+import com.luna.storynote.model.AiGatewayConfig
+import com.luna.storynote.model.StoryBook
 import java.io.File
 import java.io.InputStream
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
 actual fun rememberPlatformBookFontFamily(): FontFamily = FontFamily.Serif
+
+actual fun decodeFileToImageBitmap(file: File): ImageBitmap? {
+    if (!file.isFile || !file.canRead() || file.length() <= 0L) return null
+    return try {
+        BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+    } catch (_: Throwable) {
+        null
+    }
+}
 
 class AndroidPlatformEnvironment(
     private val appContext: Context,
     private val activityProvider: () -> Activity?,
 ) : PlatformEnvironment {
     override val storageRoot: File = appContext.getExternalFilesDir(null) ?: appContext.filesDir
-    override val authCacheFile: File = File(appContext.filesDir, "doubao_auth.json")
+    override val privateConfigDir: File = appContext.filesDir
+    override val authCacheFile: File = File(privateConfigDir, "doubao_auth.json")
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val ttsLock = Any()
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var pendingUtterance: String? = null
 
     init {
         tts = TextToSpeech(appContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.CHINA
+                val res = tts?.setLanguage(Locale.CHINA)
+                if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    tts?.setLanguage(Locale.CHINESE)
+                }
                 tts?.setSpeechRate(0.86f)
-                ttsReady = true
+                val queued = synchronized(ttsLock) {
+                    ttsReady = true
+                    val q = pendingUtterance
+                    pendingUtterance = null
+                    q
+                }
+                if (!queued.isNullOrBlank()) {
+                    tts?.speak(queued, TextToSpeech.QUEUE_FLUSH, null, "word_tts")
+                }
             }
         }
     }
@@ -46,10 +79,24 @@ class AndroidPlatformEnvironment(
     override fun createAudioPlayer(): PlatformAudioPlayer = AndroidClipPlayer()
 
     override fun speakStandardWord(word: String) {
-        if (ttsReady && word.isNotBlank()) {
-            tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_tts")
+        if (word.isBlank()) return
+        synchronized(ttsLock) {
+            if (ttsReady) {
+                tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_tts")
+            } else {
+                pendingUtterance = word
+            }
         }
     }
+
+    override fun stopSpeaking() {
+        synchronized(ttsLock) {
+            pendingUtterance = null
+            tts?.stop()
+        }
+    }
+
+    override fun loadDefaultAiConfig(): AiGatewayConfig = AiGatewayConfig()
 
     override fun openStrokeAssetStream(): InputStream? =
         try {
@@ -93,7 +140,7 @@ class AndroidPlatformEnvironment(
         val act = activityProvider() ?: return
         try {
             val mdFile = File(book.bookDir, "story.md")
-            val text = if (mdFile.isFile) mdFile.readText(Charsets.UTF_8) else book.sentences.joinToString("\n") { it.text }
+            val text = if (mdFile.isFile) mdFile.readText(Charsets.UTF_8) else book.clauses.joinToString("\n") { it.text }
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_SUBJECT, "《${book.title}》")
@@ -106,8 +153,12 @@ class AndroidPlatformEnvironment(
 
     fun shutdown() {
         releaseWakeLock()
-        tts?.shutdown()
-        tts = null
+        synchronized(ttsLock) {
+            pendingUtterance = null
+            ttsReady = false
+            tts?.shutdown()
+            tts = null
+        }
     }
 }
 
@@ -139,7 +190,7 @@ private class AndroidPcmMic : PlatformPcmMic {
         record.startRecording()
         thread = Thread(
             {
-                val buf = ByteArray(1600) // 50ms low-latency chunks
+                val buf = ByteArray(1600)
                 try {
                     while (running) {
                         val n = record.read(buf, 0, buf.size)
@@ -165,19 +216,154 @@ private class AndroidPcmMic : PlatformPcmMic {
 }
 
 private class AndroidClipPlayer : PlatformAudioPlayer {
+    @Volatile
     private var mp: MediaPlayer? = null
 
-    override fun play(wavFile: File, onCompleted: () -> Unit) {
+    @Volatile
+    private var track: AudioTrack? = null
+
+    @Volatile
+    private var playbackThread: Thread? = null
+
+    @Volatile
+    private var stopped = false
+
+    @Volatile
+    private var activePlaying = false
+
+    override fun playRange(wavFile: File, startMs: Long, endMs: Long, onCompleted: () -> Unit) {
         stop()
-        mp = MediaPlayer().apply {
-            setDataSource(wavFile.absolutePath)
-            prepare()
-            setOnCompletionListener { onCompleted() }
-            start()
+        if (!wavFile.isFile || !wavFile.canRead() || wavFile.length() <= 44L) {
+            return
+        }
+        stopped = false
+        val completedFired = AtomicBoolean(false)
+
+        var createdTrack: AudioTrack? = null
+        try {
+            val slice = WavAudioFiles.readPcmRange(wavFile, startMs, endMs)
+            if (slice == null) {
+                playViaMediaPlayer(wavFile, onCompleted, completedFired)
+                return
+            }
+            if (slice.pcmBytes.isEmpty()) {
+                if (completedFired.compareAndSet(false, true)) onCompleted()
+                return
+            }
+
+            val chMask = if (slice.format.channels >= 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
+            val enc = if (slice.format.bitsPerSample == 8) AudioFormat.ENCODING_PCM_8BIT else AudioFormat.ENCODING_PCM_16BIT
+            val minBuf = AudioTrack.getMinBufferSize(slice.format.sampleRate, chMask, enc).coerceAtLeast(4096)
+            val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(slice.format.sampleRate)
+                        .setChannelMask(chMask)
+                        .setEncoding(enc)
+                        .build(),
+                )
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setBufferSizeInBytes(minBuf)
+                .build()
+            createdTrack = audioTrack
+            if (audioTrack.state != AudioTrack.STATE_INITIALIZED) {
+                try { audioTrack.release() } catch (_: Exception) {}
+                stop()
+                return
+            }
+
+            track = audioTrack
+            activePlaying = true
+            playbackThread = Thread(
+                {
+                    try {
+                        audioTrack.play()
+                        var off = 0
+                        val pcm = slice.pcmBytes
+                        while (!stopped && off < pcm.size) {
+                            val len = minOf(4096, pcm.size - off)
+                            val written = audioTrack.write(pcm, off, len)
+                            if (written <= 0) break
+                            off += written
+                        }
+                        if (!stopped) {
+                            try { audioTrack.stop() } catch (_: Exception) {}
+                        }
+                    } catch (_: Throwable) {
+                    } finally {
+                        activePlaying = false
+                        try { audioTrack.release() } catch (_: Exception) {}
+                        if (track === audioTrack) track = null
+                        if (!stopped && completedFired.compareAndSet(false, true)) {
+                            onCompleted()
+                        }
+                    }
+                },
+                "android-pcm-range-player",
+            ).apply {
+                isDaemon = true
+                start()
+            }
+        } catch (_: Throwable) {
+            activePlaying = false
+            if (createdTrack != null && track !== createdTrack) {
+                try { createdTrack.release() } catch (_: Exception) {}
+            }
+            stop()
+        }
+    }
+
+    private fun playViaMediaPlayer(wavFile: File, onCompleted: () -> Unit, completedFired: AtomicBoolean) {
+        var player: MediaPlayer? = null
+        try {
+            val created = MediaPlayer()
+            player = created
+            created.apply {
+                setDataSource(wavFile.absolutePath)
+                prepare()
+                setOnCompletionListener {
+                    activePlaying = false
+                    try { it.release() } catch (_: Exception) {}
+                    if (mp === it) mp = null
+                    if (!stopped && completedFired.compareAndSet(false, true)) {
+                        onCompleted()
+                    }
+                }
+                setOnErrorListener { failedPlayer, _, _ ->
+                    activePlaying = false
+                    try { failedPlayer.release() } catch (_: Exception) {}
+                    if (mp === failedPlayer) mp = null
+                    true
+                }
+                mp = this
+                activePlaying = true
+                start()
+            }
+        } catch (_: Throwable) {
+            activePlaying = false
+            if (mp === player) mp = null
+            try { player?.release() } catch (_: Exception) {}
+            stop()
         }
     }
 
     override fun stop() {
+        stopped = true
+        activePlaying = false
+        track?.let {
+            try { it.pause() } catch (_: Exception) {}
+            try { it.flush() } catch (_: Exception) {}
+            try { it.stop() } catch (_: Exception) {}
+        }
+        playbackThread?.join(500L)
+        playbackThread = null
+        track = null
         mp?.let {
             try { if (it.isPlaying) it.stop() } catch (_: Exception) {}
             try { it.release() } catch (_: Exception) {}
@@ -186,5 +372,5 @@ private class AndroidClipPlayer : PlatformAudioPlayer {
     }
 
     override val isPlaying: Boolean
-        get() = try { mp?.isPlaying == true } catch (_: Exception) { false }
+        get() = activePlaying || (try { mp?.isPlaying == true } catch (_: Exception) { false })
 }

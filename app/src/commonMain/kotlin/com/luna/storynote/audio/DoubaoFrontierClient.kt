@@ -1,4 +1,4 @@
-package com.luna.storynote
+package com.luna.storynote.audio
 
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient

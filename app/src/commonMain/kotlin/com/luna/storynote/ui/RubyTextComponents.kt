@@ -1,5 +1,6 @@
 package com.luna.storynote.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -7,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -37,88 +46,37 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.luna.storynote.PinyinAnnotator
-import com.luna.storynote.SentenceClip
-import com.luna.storynote.StoryParagraphGroup
-import com.luna.storynote.WordSpan
+import com.luna.storynote.literacy.RubyCharCell
+import com.luna.storynote.literacy.RubyCluster
+import com.luna.storynote.literacy.RubyClusterer
+import com.luna.storynote.literacy.WordSpan
+import com.luna.storynote.model.Clause
+import com.luna.storynote.model.StoryParagraphGroup
+import com.luna.storynote.ui.icons.SentenceAcousticDot
+import com.luna.storynote.ui.motion.StorySprings
+import com.luna.storynote.ui.motion.clauseLandedSettle
+import com.luna.storynote.ui.motion.clauseRevisedHighlight
 
-internal data class IndexedRubyCell(
-    val charText: String,
-    val pinyin: String,
-    val isHanzi: Boolean,
-    val startIndexInSentence: Int,
-)
+private val SoftTypoUnderlineColor = Color(0xFFD4883A)
 
-internal data class IndexedRubyCluster(
-    val cells: List<IndexedRubyCell>,
-)
-
-private val OPEN_PUNCT = setOf('“', '‘', '《', '（', '(', '[', '「')
-private val CLOSE_PUNCT = setOf('，', '。', '！', '？', '、', '；', '：', '”', '’', '》', '）', ')', ']', '」', '…', '—', ',', '.', '!', '?')
-
-internal fun buildIndexedClusters(sentenceText: String): List<IndexedRubyCluster> {
-    val rawCells = PinyinAnnotator.annotateToCells(sentenceText)
-    if (rawCells.isEmpty()) return emptyList()
-
-    val indexed = ArrayList<IndexedRubyCell>(rawCells.size)
-    var charPos = 0
-    for (c in rawCells) {
-        indexed.add(IndexedRubyCell(c.charText, c.pinyin, c.isHanzi, charPos))
-        charPos += c.charText.length
-    }
-
-    val clusters = mutableListOf<IndexedRubyCluster>()
-    val pendingOpen = mutableListOf<IndexedRubyCell>()
-    var i = 0
-    while (i < indexed.size) {
-        val cell = indexed[i]
-        val ch = cell.charText.singleOrNull()
-        if (!cell.isHanzi && ch != null && ch in OPEN_PUNCT) {
-            pendingOpen.add(cell)
-            i++
-            continue
-        }
-        if (!cell.isHanzi && ch != null && ch in CLOSE_PUNCT && clusters.isNotEmpty() && pendingOpen.isEmpty()) {
-            val prev = clusters.removeAt(clusters.lastIndex)
-            clusters.add(IndexedRubyCluster(prev.cells + cell))
-            i++
-            continue
-        }
-        val group = ArrayList<IndexedRubyCell>()
-        group.addAll(pendingOpen)
-        pendingOpen.clear()
-        group.add(cell)
-        i++
-        while (i < indexed.size) {
-            val next = indexed[i]
-            val nch = next.charText.singleOrNull()
-            if (!next.isHanzi && nch != null && nch in CLOSE_PUNCT) {
-                group.add(next)
-                i++
-            } else {
-                break
-            }
-        }
-        clusters.add(IndexedRubyCluster(group))
-    }
-    if (pendingOpen.isNotEmpty()) {
-        if (clusters.isNotEmpty()) {
-            val prev = clusters.removeAt(clusters.lastIndex)
-            clusters.add(IndexedRubyCluster(prev.cells + pendingOpen))
-        } else {
-            clusters.add(IndexedRubyCluster(pendingOpen.toList()))
+internal fun resolveSoftAnnotationForCell(
+    clause: Clause,
+    charIndex: Int,
+): Pair<String?, Boolean> {
+    val ann = clause.softAnnotations.firstOrNull {
+        it.charIndex >= 0 && it.length > 0 && charIndex in it.charIndex until (it.charIndex + it.length)
+    } ?: return null to false
+    val correctedPy = ann.correctedPinyin?.trim()?.takeIf { it.isNotEmpty() }?.let { raw ->
+        val parts = raw.split(Regex("\\s+"))
+        when {
+            parts.size == ann.length -> parts.getOrNull(charIndex - ann.charIndex)
+            ann.length == 1 -> raw
+            else -> null
         }
     }
-    return clusters
+    return correctedPy to !ann.suggestedWord.isNullOrBlank()
 }
 
-/**
- * Interactive book paragraph where:
- * - Multiple `SentenceClip`s flow seamlessly together with a 2-character first-line indent (`首行缩进两格`)
- * - Each sentence begins with its subtle `SentenceAcousticDot` (tap to hear voice & reveal 3-icon capsule)
- * - Tapping any Chinese character opens the `田字格` stroke & spelling card for that word
- * - If the active ink cursor sits inside this paragraph, renders the breathing Vermilion cursor + live spoken Pinyin draft!
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun InteractiveRubyParagraph(
@@ -131,45 +89,65 @@ fun InteractiveRubyParagraph(
     cursorAfterSentenceId: String?,
     liveDraftText: String,
     isReplacingSentenceId: String?,
-    onTapSentenceDot: (SentenceClip) -> Unit,
-    onTapCharacter: (SentenceClip, Int) -> Unit,
+    justLandedClauseId: String? = null,
+    revisedClauseId: String? = null,
+    voiceRevisingClauseId: String? = null,
+    onTapSentenceDot: (Clause) -> Unit,
+    onTapCharacter: (Clause, Int) -> Unit,
     onPlaceCursorAfter: (String) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     FlowRow(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.78f, stiffness = 360f)),
         horizontalArrangement = Arrangement.Start,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 2-character textbook paragraph indent
-        Spacer(Modifier.width(72.dp))
-
-        for (sentence in group.sentences) {
-            val isPlaying = playingSentenceId == sentence.id
-            val isSelected = selectedSentenceId == sentence.id
-            val isBeingReplaced = isReplacingSentenceId == sentence.id
+        group.clauses.forEachIndexed { clauseIdx, clause ->
+            val isPlaying = playingSentenceId == clause.id
+            val isSelected = selectedSentenceId == clause.id
+            val isBeingReplaced = isReplacingSentenceId == clause.id
+            val isVoiceRevising = voiceRevisingClauseId == clause.id
+            val isJustRevised = revisedClauseId == clause.id
             val sentBg = when {
+                isVoiceRevising -> VermilionSoft
                 isPlaying || isSelected -> HighlightSun
                 else -> Color.Transparent
             }
+            val motionMod = when {
+                justLandedClauseId == clause.id -> Modifier.clauseLandedSettle(isJustLanded = true)
+                isJustRevised -> Modifier.clauseRevisedHighlight(isJustRevised = true)
+                else -> Modifier
+            }
 
-            // Subtle acoustic dot anchored at the start of the sentence
+            if (clauseIdx == 0) {
+                Spacer(Modifier.width(48.dp))
+            }
+
             Box(
                 modifier = Modifier
                     .height(50.dp)
-                    .padding(end = 2.dp),
+                    .padding(start = if (clauseIdx == 0) 0.dp else 4.dp, end = 2.dp)
+                    .testTag("clause_row_${clause.id}")
+                    .semantics { text = AnnotatedString(clause.text) }
+                    .then(motionMod),
                 contentAlignment = Alignment.BottomCenter,
             ) {
                 Box(modifier = Modifier.padding(bottom = 4.dp)) {
                     SentenceAcousticDot(
                         isPlaying = isPlaying,
                         isSelected = isSelected,
-                        onClick = { onTapSentenceDot(sentence) },
+                        onClick = { onTapSentenceDot(clause) },
+                        modifier = Modifier
+                            .testTag("clause_dot_${clause.id}")
+                            .semantics { contentDescription = "句子" },
                     )
                 }
             }
 
             if (isBeingReplaced && liveDraftText.isNotBlank()) {
-                val draftClusters = remember(liveDraftText) { buildIndexedClusters(liveDraftText) }
+                val draftClusters = remember(liveDraftText) { RubyClusterer.annotateAndCluster(liveDraftText) }
                 for (cluster in draftClusters) {
                     ClusterCellRow(
                         cluster = cluster,
@@ -181,10 +159,11 @@ fun InteractiveRubyParagraph(
                         pinyinColor = Vermilion.copy(alpha = 0.8f),
                         cellBackground = { VermilionSoft },
                         onClickCell = null,
+                        modifier = motionMod,
                     )
                 }
             } else {
-                val clusters = remember(sentence.text) { buildIndexedClusters(sentence.text) }
+                val clusters = remember(clause.text) { RubyClusterer.annotateAndCluster(clause.text) }
                 for (cluster in clusters) {
                     ClusterCellRow(
                         cluster = cluster,
@@ -194,8 +173,14 @@ fun InteractiveRubyParagraph(
                         hanziWeight = FontWeight.Normal,
                         hanziColor = InkPrimary,
                         pinyinColor = InkPinyin,
+                        pinyinOverride = { cell ->
+                            if (cell.isHanzi) resolveSoftAnnotationForCell(clause, cell.startIndexInSentence).first else null
+                        },
+                        hasSoftUnderline = { cell ->
+                            cell.isHanzi && resolveSoftAnnotationForCell(clause, cell.startIndexInSentence).second
+                        },
                         cellBackground = { cell ->
-                            val inInspectedWord = inspectedSentenceId == sentence.id &&
+                            val inInspectedWord = inspectedSentenceId == clause.id &&
                                 inspectedWordSpan != null &&
                                 cell.startIndexInSentence in inspectedWordSpan.startCharIndex until inspectedWordSpan.endCharIndex
                             when {
@@ -205,18 +190,19 @@ fun InteractiveRubyParagraph(
                             }
                         },
                         onClickCell = { cell ->
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             if (cell.isHanzi) {
-                                onTapCharacter(sentence, cell.startIndexInSentence)
+                                onTapCharacter(clause, cell.startIndexInSentence)
                             } else {
-                                onPlaceCursorAfter(sentence.id)
+                                onPlaceCursorAfter(clause.id)
                             }
                         },
+                        modifier = motionMod,
                     )
                 }
             }
 
-            // If cursor sits right after this sentence, render breathing ink bar + live draft right in-flow!
-            if (cursorAfterSentenceId == sentence.id && isReplacingSentenceId == null) {
+            if (cursorAfterSentenceId == clause.id && isReplacingSentenceId == null) {
                 BreathingInkCursorWithDraft(
                     liveDraftText = liveDraftText,
                     bookFont = bookFont,
@@ -241,7 +227,7 @@ fun BreathingInkCursorWithDraft(
     )
 
     if (liveDraftText.isNotBlank()) {
-        val draftClusters = remember(liveDraftText) { buildIndexedClusters(liveDraftText) }
+        val draftClusters = remember(liveDraftText) { RubyClusterer.annotateAndCluster(liveDraftText) }
         for (cluster in draftClusters) {
             ClusterCellRow(
                 cluster = cluster,
@@ -277,46 +263,12 @@ fun BreathingInkCursorWithDraft(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun RubyBookTitle(
-    title: String,
-    bookFont: FontFamily,
-    modifier: Modifier = Modifier,
-    hanziSize: TextUnit = 26.sp,
-    pinyinSize: TextUnit = 12.sp,
-    centerAlign: Boolean = true,
-) {
-    val clusters = remember(title) { buildIndexedClusters(title) }
-    FlowRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = if (centerAlign) Arrangement.Center else Arrangement.Start,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        for (cluster in clusters) {
-            ClusterCellRow(
-                cluster = cluster,
-                bookFont = bookFont,
-                hanziSize = hanziSize,
-                pinyinSize = pinyinSize,
-                hanziWeight = FontWeight.Bold,
-                hanziColor = InkPrimary,
-                pinyinColor = InkPinyin,
-                minHanziWidth = 36.dp,
-                pinyinMinHeight = 20.dp,
-                cellBackground = { Color.Transparent },
-                onClickCell = null,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
 fun RubyCoverPlateTitle(
     title: String,
     bookFont: FontFamily,
     modifier: Modifier = Modifier,
 ) {
-    val clusters = remember(title) { buildIndexedClusters(title) }
+    val clusters = remember(title) { RubyClusterer.annotateAndCluster(title) }
     FlowRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
@@ -341,8 +293,8 @@ fun RubyCoverPlateTitle(
 }
 
 @Composable
-private fun ClusterCellRow(
-    cluster: IndexedRubyCluster,
+internal fun ClusterCellRow(
+    cluster: RubyCluster,
     bookFont: FontFamily,
     hanziSize: TextUnit,
     pinyinSize: TextUnit,
@@ -351,18 +303,26 @@ private fun ClusterCellRow(
     pinyinColor: Color,
     minHanziWidth: Dp = 36.dp,
     pinyinMinHeight: Dp = 20.dp,
-    cellBackground: (IndexedRubyCell) -> Color,
-    onClickCell: ((IndexedRubyCell) -> Unit)?,
+    pinyinOverride: ((RubyCharCell) -> String?)? = null,
+    hasSoftUnderline: ((RubyCharCell) -> Boolean)? = null,
+    cellBackground: (RubyCharCell) -> Color,
+    onClickCell: ((RubyCharCell) -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
-    Row(verticalAlignment = Alignment.Bottom) {
+    Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
         for (cell in cluster.cells) {
             val bg = cellBackground(cell)
             val minW = if (cell.isHanzi) minHanziWidth else 14.dp
             val clickMod = if (onClickCell != null) {
-                Modifier.clickable { onClickCell(cell) }
+                Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onClickCell(cell) }
             } else {
                 Modifier
             }
+            val effectivePinyin = pinyinOverride?.invoke(cell) ?: cell.pinyin
+            val showUnderline = hasSoftUnderline?.invoke(cell) == true
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -379,9 +339,9 @@ private fun ClusterCellRow(
                         .padding(bottom = 2.dp),
                     contentAlignment = Alignment.BottomCenter,
                 ) {
-                    if (cell.pinyin.isNotEmpty()) {
+                    if (effectivePinyin.isNotEmpty()) {
                         Text(
-                            text = cell.pinyin,
+                            text = effectivePinyin,
                             fontFamily = FontFamily.SansSerif,
                             fontSize = pinyinSize,
                             lineHeight = (pinyinSize.value + 4f).sp,
@@ -405,6 +365,16 @@ private fun ClusterCellRow(
                     softWrap = false,
                     textAlign = TextAlign.Center,
                 )
+                if (showUnderline) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 1.dp)
+                            .width(18.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(SoftTypoUnderlineColor.copy(alpha = 0.78f)),
+                    )
+                }
             }
         }
     }

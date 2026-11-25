@@ -1,34 +1,9 @@
-package com.luna.storynote
+package com.luna.storynote.literacy
 
 import com.github.houbb.pinyin.constant.enums.PinyinStyleEnum
 import com.github.houbb.pinyin.util.PinyinHelper
 
-/**
- * Single character cell inside a ruby-annotated unit.
- * Punctuation marks have `pinyin = ""` so their vertical baseline aligns cleanly with Hanzi.
- */
-data class RubyCharCell(
-    val charText: String,
-    val pinyin: String,
-    val isHanzi: Boolean,
-)
-
-/**
- * Non-breaking visual cluster respecting Chinese GB/T 15834 line-breaking rules (避头尾禁则):
- * opening quotes/brackets stay attached to the following character, and trailing commas/periods/quotes
- * stay attached to the preceding character so punctuation never dangles at the start of a line.
- */
-data class RubyCluster(
-    val cells: List<RubyCharCell>,
-)
-
 object PinyinAnnotator {
-    private val OPENING_PUNCT = setOf('“', '‘', '《', '（', '(', '[', '【', '「', '『')
-    private val TRAILING_PUNCT = setOf(
-        '，', '。', '！', '？', '、', '；', '：', '”', '’', '》', '）', ')', ']', '】', '」', '』',
-        '…', '—', ',', '.', '!', '?', ';', ':',
-    )
-
     // Grade-1 textbook neutral-tone (轻声) second-syllable lexicon
     private val NEUTRAL_SECOND_SYLLABLE_WORDS = mapOf(
         "妈妈" to ("mā" to "ma"),
@@ -253,6 +228,7 @@ object PinyinAnnotator {
                             charText = hanziRun[k].toString(),
                             pinyin = pinyins.getOrElse(k) { "" },
                             isHanzi = true,
+                            startIndexInSentence = start + k,
                         ),
                     )
                 }
@@ -268,11 +244,19 @@ object PinyinAnnotator {
                             charText = text.substring(start, i),
                             pinyin = "",
                             isHanzi = false,
+                            startIndexInSentence = start,
                         ),
                     )
                 } else {
                     if (ch != '\n' && ch != '\r') {
-                        out.add(RubyCharCell(charText = ch.toString(), pinyin = "", isHanzi = false))
+                        out.add(
+                            RubyCharCell(
+                                charText = ch.toString(),
+                                pinyin = "",
+                                isHanzi = false,
+                                startIndexInSentence = i,
+                            ),
+                        )
                     }
                     i++
                 }
@@ -281,65 +265,8 @@ object PinyinAnnotator {
         return out
     }
 
-    /**
-     * Groups cells into non-breaking `RubyCluster`s so opening/trailing punctuation never wraps onto
-     * forbidden line edges when laid out with `FlowRow`.
-     */
-    fun annotateParagraphToClusters(paragraph: String): List<RubyCluster> {
-        val cells = annotateToCells(paragraph.trim())
-        if (cells.isEmpty()) return emptyList()
-
-        val clusters = mutableListOf<RubyCluster>()
-        val pendingLeading = mutableListOf<RubyCharCell>()
-        var idx = 0
-
-        while (idx < cells.size) {
-            val cell = cells[idx]
-            val singleChar = cell.charText.singleOrNull()
-
-            if (!cell.isHanzi && singleChar != null && singleChar in OPENING_PUNCT) {
-                pendingLeading.add(cell)
-                idx++
-                continue
-            }
-
-            if (!cell.isHanzi && singleChar != null && singleChar in TRAILING_PUNCT && clusters.isNotEmpty() && pendingLeading.isEmpty()) {
-                val prev = clusters.removeAt(clusters.lastIndex)
-                clusters.add(RubyCluster(prev.cells + cell))
-                idx++
-                continue
-            }
-
-            val group = mutableListOf<RubyCharCell>()
-            group.addAll(pendingLeading)
-            pendingLeading.clear()
-            group.add(cell)
-            idx++
-
-            // Attach any immediately following trailing punctuation (`，`, `。`, `。”`, `……`) to this character
-            while (idx < cells.size) {
-                val next = cells[idx]
-                val nextCh = next.charText.singleOrNull()
-                if (!next.isHanzi && nextCh != null && nextCh in TRAILING_PUNCT) {
-                    group.add(next)
-                    idx++
-                } else {
-                    break
-                }
-            }
-            clusters.add(RubyCluster(group))
-        }
-
-        if (pendingLeading.isNotEmpty()) {
-            if (clusters.isNotEmpty()) {
-                val prev = clusters.removeAt(clusters.lastIndex)
-                clusters.add(RubyCluster(prev.cells + pendingLeading))
-            } else {
-                clusters.add(RubyCluster(pendingLeading.toList()))
-            }
-        }
-        return clusters
-    }
+    fun annotateParagraphToClusters(paragraph: String): List<RubyCluster> =
+        RubyClusterer.annotateAndCluster(paragraph.trim())
 
     internal fun annotateHanziRun(hanziRun: String): List<String> {
         if (hanziRun.isEmpty()) return emptyList()
@@ -361,7 +288,7 @@ object PinyinAnnotator {
             }
         }
 
-        // 1. Apply common structural particle defaults (`的 -> de`, `了 -> le` unless overridden below)
+        // 1. Structural particle defaults
         for (idx in hanziRun.indices) {
             when (hanziRun[idx]) {
                 '的' -> {
@@ -372,12 +299,8 @@ object PinyinAnnotator {
                     val next = if (idx + 1 < hanziRun.length) hanziRun[idx + 1] else '\u0000'
                     if (next != '解' && next != '不') tokens[idx] = "le"
                 }
-                '着' -> {
-                    // Default post-verbal aspect particle `V + 着` -> `zhe` unless overridden
-                    if (idx > 0) tokens[idx] = "zhe"
-                }
+                '着' -> if (idx > 0) tokens[idx] = "zhe"
                 '地' -> {
-                    // Adverbial `Adj + 地 + V` (e.g., 开心地笑 / 慢慢地走) -> `de`, preserving nouns like `地图 (dì tú)`
                     if (idx >= 2 && idx + 1 < hanziRun.length && hanziRun[idx + 1] !in DI_NOUN_FOLLOWERS) {
                         val isRedupAdj = hanziRun[idx - 1] == hanziRun[idx - 2] && hanziRun[idx - 1] !in REDUPLICATED_NOUN_CHARS
                         val isKnownAdv = ADVERBIAL_DI_PREFIXES.any { pref ->
@@ -391,7 +314,7 @@ object PinyinAnnotator {
             }
         }
 
-        // 2. Apply neutral-tone 2-character lexicon (`妈妈 -> mā ma`, `月亮 -> yuè liang`, etc.)
+        // 2. Neutral-tone 2-character lexicon
         for ((word, pair) in NEUTRAL_SECOND_SYLLABLE_WORDS) {
             var pos = hanziRun.indexOf(word)
             while (pos >= 0) {
@@ -401,7 +324,7 @@ object PinyinAnnotator {
             }
         }
 
-        // 3. Apply explicit phrase polyphone overrides (longest phrases listed first)
+        // 3. Explicit phrase polyphone overrides
         val matchedMask = BooleanArray(hanziRun.length)
         for ((phrase, pyList) in PHRASE_POLYPHONE_OVERRIDES) {
             var pos = hanziRun.indexOf(phrase)
@@ -417,15 +340,14 @@ object PinyinAnnotator {
             }
         }
 
-        // 4. Sentence-end modal particles (`吗/呢/吧/呀/啦`)
+        // 4. Sentence-end modal particles
         val lastIdx = hanziRun.lastIndex
         SENTENCE_FINAL_PARTICLES[hanziRun[lastIdx]]?.let { neutral ->
             tokens[lastIdx] = neutral
         }
 
-        // 5. People's Education Press (部编版一年级语文) tone sandhi for `一` and `不`
+        // 5. Grade-1 tone sandhi for `一` and `不`
         applyYiBuToneSandhi(hanziRun, tokens)
-
         return tokens
     }
 
@@ -445,7 +367,6 @@ object PinyinAnnotator {
             val nextCh = hanziRun[i + 1]
             val nextTone = detectSyllableTone(tokens[i + 1])
             if (ch == '不' && tokens[i] == "bù") {
-                // Reduplicative A-not-A (`好不好`, `去不去`) -> neutral `bu`; before 4th tone -> `bú`
                 if (i > 0 && hanziRun[i - 1] == nextCh) {
                     tokens[i] = "bu"
                 } else if (nextTone == 4) {
@@ -456,7 +377,6 @@ object PinyinAnnotator {
                     nextCh in "一二三四五六七八九十百千万亿"
                 if (!isOrdinalOrNumber) {
                     if (i > 0 && hanziRun[i - 1] == nextCh) {
-                        // `看一看`, `想一想` -> neutral `yi`
                         tokens[i] = "yi"
                     } else if (nextTone == 4) {
                         tokens[i] = "yí"

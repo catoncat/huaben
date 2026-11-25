@@ -1,4 +1,4 @@
-package com.luna.storynote
+package com.luna.storynote.literacy
 
 import java.io.DataInputStream
 import java.io.InputStream

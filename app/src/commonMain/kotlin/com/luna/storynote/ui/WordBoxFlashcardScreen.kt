@@ -3,7 +3,6 @@ package com.luna.storynote.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +26,11 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -37,8 +40,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luna.storynote.BookStudioController
-import com.luna.storynote.CollectedWordCard
-import com.luna.storynote.StudioUiState
+import com.luna.storynote.model.CollectedWordCard
+import com.luna.storynote.model.StudioUiState
+import com.luna.storynote.ui.icons.IconChevronBack
+import com.luna.storynote.ui.icons.IconWordBoxDeck
+import com.luna.storynote.ui.motion.springPressScale
 
 /**
  * `字词盒` Flashcard Deck:
@@ -63,7 +69,12 @@ internal fun WordBoxFlashcardScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularChromeIconButton(onClick = { controller.returnToShelf() }) {
+            CircularChromeIconButton(
+                onClick = { controller.returnToShelf() },
+                modifier = Modifier
+                    .testTag("back_button")
+                    .semantics { contentDescription = "返回" },
+            ) {
                 IconChevronBack(color = InkPrimary, size = 18.dp)
             }
             Text(
@@ -151,7 +162,8 @@ private fun FlippableWordCard(
                 rotationY = rotY
                 cameraDistance = 14f * density
             }
-            .clickable(onClick = onFlip),
+            .clip(RoundedCornerShape(22.dp))
+            .springPressScale(pressedScale = 0.96f, onClick = onFlip),
         shape = RoundedCornerShape(22.dp),
         color = if (rotY <= 90f) BookPaper else BookPaperWarm,
         border = BorderStroke(1.5.dp, if (rotY <= 90f) BookOutline else JadeInk.copy(alpha = 0.5f)),

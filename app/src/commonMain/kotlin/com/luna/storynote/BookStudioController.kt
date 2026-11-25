@@ -1,5 +1,35 @@
 package com.luna.storynote
 
+import com.luna.storynote.agent.AgentTaskRole
+import com.luna.storynote.agent.CommittedUtteranceHandler
+import com.luna.storynote.agent.ToolBus
+import com.luna.storynote.agent.ToolId
+import com.luna.storynote.agent.ToolRequest
+import com.luna.storynote.agent.ToolResult
+import com.luna.storynote.ai.AiConnectionTestResult
+import com.luna.storynote.ai.AiGatewayClient
+import com.luna.storynote.ai.AiSettingsCoordinator
+import com.luna.storynote.ai.BookAiCoordinator
+import com.luna.storynote.audio.AudioPlaybackCoordinator
+import com.luna.storynote.audio.DoubaoAuthRepository
+import com.luna.storynote.audio.MicRecordingCoordinator
+import com.luna.storynote.literacy.HanziStrokeRepository
+import com.luna.storynote.literacy.JiebaWordSegmenter
+import com.luna.storynote.literacy.LiteracyEngine
+import com.luna.storynote.literacy.WordSpan
+import com.luna.storynote.model.ActiveWordInspection
+import com.luna.storynote.model.AiGatewayConfig
+import com.luna.storynote.model.Clause
+import com.luna.storynote.model.CollectedWordCard
+import com.luna.storynote.model.MicIntent
+import com.luna.storynote.model.StoryBook
+import com.luna.storynote.model.StudioDestination
+import com.luna.storynote.model.StudioUiState
+import com.luna.storynote.model.UiMotionEvent
+import com.luna.storynote.model.UndoDeletedClause
+import com.luna.storynote.storage.AiConfigStore
+import com.luna.storynote.storage.ClauseHistoryEntry
+import com.luna.storynote.storage.StoryBookRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,32 +44,75 @@ import java.io.File
 
 class BookStudioController(
     val env: PlatformEnvironment,
-    private val ensureMicPermission: ((onGranted: () -> Unit) -> Unit)? = null,
+    ensureMicPermission: ((onGranted: () -> Unit) -> Unit)? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val httpClient = DoubaoAuthRepository.defaultHttpClient()
     private val authRepo = DoubaoAuthRepository(env.authCacheFile, httpClient)
     val repo = StoryBookRepository(env.storageRoot)
+    val toolBus = ToolBus(repo) { bookId, _ -> refreshBookState(bookId) }
+    val aiConfigStore = AiConfigStore(env.privateConfigDir)
+    val aiGatewayClient = AiGatewayClient()
 
     private val _uiState = MutableStateFlow(StudioUiState())
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
+    val isAiConfigured: Boolean get() = _uiState.value.aiConfig.isConfigured
 
-    private var pcmMic: PlatformPcmMic? = null
-    private var streamRecorder: UtteranceStreamRecorder? = null
-    private var micStartedAtMs = 0L
+    private val aiSettings = AiSettingsCoordinator(env, aiConfigStore, aiGatewayClient, scope, _uiState)
+    private val aiCoordinator = BookAiCoordinator(env, toolBus, aiGatewayClient, scope, _uiState, ::refreshBookState, ::postNotice)
+    private val utteranceHandler = CommittedUtteranceHandler(
+        repo = repo, toolBus = toolBus, scope = scope, uiState = _uiState, refreshBookState = ::refreshBookState,
+        onSpeechLanded = { bId, cIds -> aiCoordinator.scheduleSilentCopyEdit(bId, cIds) },
+        onVoiceRevision = { bId, cId, instr -> aiCoordinator.submitVoiceRevision(bId, cId, instr) },
+    )
 
-    private var audioPlayer: PlatformAudioPlayer? = null
+    private val audioCoordinator = AudioPlaybackCoordinator(
+        env = env, scope = scope,
+        onStateChanged = { clauseId, fullBook, targetPage ->
+            _uiState.update { st ->
+                st.copy(
+                    playingClauseId = clauseId, isFullBookPlaying = fullBook,
+                    currentPageIndex = targetPage ?: st.currentPageIndex,
+                    selectedClauseId = if (fullBook) null else st.selectedClauseId,
+                    inspectedWord = if (fullBook) null else st.inspectedWord,
+                )
+            }
+        },
+        getBookById = { id -> _uiState.value.books.firstOrNull { it.id == id } },
+        isStillFullBookPlaying = { _uiState.value.isFullBookPlaying },
+        getPlayingClauseId = { _uiState.value.playingClauseId },
+    )
+
+    private val micCoordinator = MicRecordingCoordinator(
+        env = env, authRepo = authRepo, httpClient = httpClient, repo = repo, scope = scope,
+        ensureMicPermission = ensureMicPermission,
+        onStateStarted = { intent ->
+            _uiState.update {
+                it.copy(
+                    activeMicIntent = intent, liveDraftText = "", voiceEnergy = 0f,
+                    inspectedWord = if (intent is MicIntent.ReplaceWord) it.inspectedWord else null,
+                )
+            }
+        },
+        onLiveDraft = { draft, level ->
+            _uiState.update { st ->
+                if (!st.isRecording) st else st.copy(liveDraftText = draft, voiceEnergy = if (level > 0f) level else st.voiceEnergy * 0.85f)
+            }
+        },
+        onUtteranceCommitted = { bookId, intent, committed -> utteranceHandler.handle(bookId, intent, committed) },
+        onRecordingCleared = { _uiState.update { it.copy(activeMicIntent = null, liveDraftText = "", voiceEnergy = 0f) } },
+        onError = { err -> postNotice(err) },
+    )
 
     init {
+        JiebaWordSegmenter.warmUpAsync(scope)
         scope.launch(Dispatchers.IO) {
             HanziStrokeRepository.ensureLoaded { env.openStrokeAssetStream() }
             val books = repo.listBooks()
             val words = repo.listCollectedWords()
-            _uiState.update { it.copy(books = books, collectedWords = words) }
-            try {
-                authRepo.resolve(forceRefresh = false)
-            } catch (_: Exception) {
-            }
+            val aiCfg = aiConfigStore.loadOrDefault(env)
+            _uiState.update { it.copy(books = books, collectedWords = words, aiConfig = aiCfg) }
+            runCatching { authRepo.resolve(forceRefresh = false) }
         }
     }
 
@@ -51,419 +124,186 @@ class BookStudioController(
         }
     }
 
+    private fun refreshBookState(bookId: String, extra: (StudioUiState) -> StudioUiState = { it }) {
+        val books = repo.listBooks()
+        val snapshots = repo.timeMachine.listSnapshots(bookId)
+        val bible = repo.bookBibles.read(bookId)
+        _uiState.update { st ->
+            val base = if (st.activeBookId == bookId) st.copy(books = books, timeMachineSnapshots = snapshots, bookBible = bible) else st.copy(books = books)
+            extra(base)
+        }
+    }
+
+    private fun dispatchUserTool(toolId: ToolId, vararg params: Pair<String, Any?>): ToolResult.Success? =
+        toolBus.dispatch(AgentTaskRole.USER_DIRECT, ToolRequest(toolId, params.toMap())) as? ToolResult.Success
+
+    private fun StudioUiState.withResetOverlayState(
+        dest: StudioDestination,
+        bookId: String?,
+        cursorId: String? = null,
+    ): StudioUiState = copy(
+        destination = dest, activeBookId = bookId, currentPageIndex = 0, cursorAfterClauseId = cursorId,
+        selectedClauseId = null, inspectedWord = null, isTimeMachineOpen = false, timeMachineTargetClauseId = null,
+        illustratingPageIndex = null, isVoiceRevising = false, isVoiceSparkSpeaking = false, activeSparkQuestion = null,
+    )
+
     fun openBook(bookId: String) {
         stopAllAudioAndMic()
+        _uiState.value.activeBookId?.takeIf { it != bookId }?.let { aiCoordinator.cancelTransientOnSwitch(it) }
         val book = _uiState.value.books.firstOrNull { it.id == bookId } ?: return
-        val lastSentenceId = book.sentences.lastOrNull()?.id
         _uiState.update {
-            it.copy(
-                destination = StudioDestination.BOOK,
-                activeBookId = bookId,
-                currentPageIndex = 0,
-                cursorAfterSentenceId = lastSentenceId,
-                selectedSentenceId = null,
-                inspectedWord = null,
-            )
+            it.withResetOverlayState(StudioDestination.BOOK, bookId, book.clauses.lastOrNull()?.id)
+                .copy(bookBible = repo.bookBibles.read(bookId), timeMachineSnapshots = repo.timeMachine.listSnapshots(bookId))
         }
     }
 
     fun createAndOpenNewBook() {
         stopAllAudioAndMic()
+        _uiState.value.activeBookId?.let { aiCoordinator.cancelTransientOnSwitch(it) }
         scope.launch(Dispatchers.IO) {
             val created = repo.createBlankBook()
-            val all = repo.listBooks()
-            _uiState.update {
-                it.copy(
-                    books = all,
-                    destination = StudioDestination.BOOK,
-                    activeBookId = created.id,
-                    currentPageIndex = 0,
-                    cursorAfterSentenceId = null,
-                    selectedSentenceId = null,
-                    inspectedWord = null,
-                )
+            refreshBookState(created.id) {
+                it.withResetOverlayState(StudioDestination.BOOK, created.id)
+                    .copy(bookBible = repo.bookBibles.read(created.id), timeMachineSnapshots = emptyList())
             }
         }
     }
 
     fun returnToShelf() {
         stopAllAudioAndMic()
-        _uiState.update {
-            it.copy(
-                destination = StudioDestination.SHELF,
-                activeBookId = null,
-                selectedSentenceId = null,
-                inspectedWord = null,
-            )
-        }
+        _uiState.value.activeBookId?.let { aiCoordinator.cancelTransientOnSwitch(it) }
+        _uiState.update { it.withResetOverlayState(StudioDestination.SHELF, null) }
     }
 
     fun openWordBox() {
         stopAllAudioAndMic()
-        _uiState.update {
-            it.copy(destination = StudioDestination.WORD_BOX, inspectedWord = null)
-        }
+        _uiState.update { it.copy(destination = StudioDestination.WORD_BOX, inspectedWord = null, isTimeMachineOpen = false, timeMachineTargetClauseId = null) }
     }
 
     fun setCurrentPage(pageIndex: Int) {
         val book = _uiState.value.activeBook ?: return
         val maxPage = (book.paginate().size - 1).coerceAtLeast(0)
-        _uiState.update { it.copy(currentPageIndex = pageIndex.coerceIn(0, maxPage)) }
+        _uiState.update {
+            it.copy(currentPageIndex = pageIndex.coerceIn(0, maxPage), selectedClauseId = null, inspectedWord = null, activeSparkQuestion = null)
+        }
     }
 
     fun cycleCoverStyle(bookId: String) {
         val book = _uiState.value.books.firstOrNull { it.id == bookId } ?: return
         scope.launch(Dispatchers.IO) {
-            repo.updateBookTitleAndCover(
-                bookId = bookId,
-                coverColorIndex = (book.coverColorIndex + 1) % 6,
-                emblemIndex = (book.emblemIndex + 1) % 6,
-            )
+            repo.updateBookTitleAndCover(bookId, coverColorIndex = (book.coverColorIndex + 1) % 6, emblemIndex = (book.emblemIndex + 1) % 6)
             _uiState.update { it.copy(books = repo.listBooks()) }
         }
     }
 
-    fun playBookTitleVoice(book: StoryBook) {
-        val titleWav = book.titleAudioFile()
-        if (titleWav != null) {
-            stopAudioPlayback()
-            val p = env.createAudioPlayer()
-            audioPlayer = p
-            p.play(titleWav) { scope.launch { stopAudioPlayback() } }
-        } else {
-            env.speakStandardWord(book.title)
-        }
+    fun playBookTitleVoice(book: StoryBook) = audioCoordinator.playBookTitleVoice(book)
+
+    fun moveCursorAfter(clauseId: String?) {
+        _uiState.update { it.copy(cursorAfterClauseId = clauseId, selectedClauseId = null, inspectedWord = null) }
     }
 
-    fun moveCursorAfter(sentenceId: String?) {
-        _uiState.update {
-            it.copy(
-                cursorAfterSentenceId = sentenceId,
-                selectedSentenceId = null,
-                inspectedWord = null,
-            )
-        }
-    }
-
-    // --- Sentence Audio & In-Place Editing ---
-
-    fun onSentenceDotTapped(sentence: SentenceClip) {
+    fun onClauseDotTapped(clause: Clause) {
         val st = _uiState.value
         val book = st.activeBook ?: return
         if (st.isRecording) stopRecording()
-
-        val alreadySelected = st.selectedSentenceId == sentence.id
-        if (alreadySelected && st.playingSentenceId == sentence.id) {
+        if (st.selectedClauseId == clause.id && st.playingClauseId == clause.id) {
             stopAudioPlayback()
-            _uiState.update { it.copy(selectedSentenceId = null) }
+            _uiState.update { it.copy(selectedClauseId = null, activeSparkQuestion = null) }
             return
         }
+        _uiState.update { it.copy(selectedClauseId = clause.id, cursorAfterClauseId = clause.id, inspectedWord = null, activeSparkQuestion = null) }
+        audioCoordinator.playSingleClause(book, clause)
+    }
 
-        _uiState.update {
-            it.copy(
-                selectedSentenceId = sentence.id,
-                cursorAfterSentenceId = sentence.id,
-                inspectedWord = null,
-            )
-        }
-        playSingleSentenceClip(book, sentence)
+    fun playClauseById(clauseId: String) {
+        val book = _uiState.value.activeBook ?: return
+        val clause = book.clauses.firstOrNull { it.id == clauseId } ?: return
+        if (_uiState.value.isRecording) stopRecording()
+        audioCoordinator.playSingleClause(book, clause)
     }
 
     fun dismissSelectionAndPopovers() {
-        if (_uiState.value.playingSentenceId != null && !_uiState.value.isFullBookPlaying) {
-            stopAudioPlayback()
-        }
-        _uiState.update { it.copy(selectedSentenceId = null, inspectedWord = null) }
-    }
-
-    private fun playSingleSentenceClip(book: StoryBook, sentence: SentenceClip) {
-        stopAudioPlayback()
-        val wav = book.audioFileFor(sentence)
-        if (wav == null) {
-            env.speakStandardWord(sentence.text)
-            return
-        }
-        try {
-            val player = env.createAudioPlayer()
-            audioPlayer = player
-            _uiState.update { it.copy(playingSentenceId = sentence.id, isFullBookPlaying = false) }
-            player.play(wav) {
-                scope.launch {
-                    if (_uiState.value.playingSentenceId == sentence.id && !_uiState.value.isFullBookPlaying) {
-                        stopAudioPlayback()
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            stopAudioPlayback()
-        }
+        if (_uiState.value.playingClauseId != null && !_uiState.value.isFullBookPlaying) stopAudioPlayback()
+        _uiState.update { it.copy(selectedClauseId = null, inspectedWord = null, activeSparkQuestion = null) }
     }
 
     fun toggleFullBookReadAlong() {
         val st = _uiState.value
-        if (st.isFullBookPlaying) {
-            stopAudioPlayback()
-            return
-        }
+        if (st.isFullBookPlaying) { stopAudioPlayback(); return }
         val book = st.activeBook ?: return
-        if (book.sentences.isEmpty()) return
+        if (book.clauses.isEmpty()) return
         if (st.isRecording) stopRecording()
-
-        playBookFromSentenceIndex(book.id, 0)
+        audioCoordinator.playBookFromClauseIndex(book.id, 0)
     }
 
-    private fun playBookFromSentenceIndex(bookId: String, index: Int) {
-        val book = _uiState.value.books.firstOrNull { it.id == bookId } ?: return
-        if (index !in book.sentences.indices) {
-            stopAudioPlayback()
-            return
-        }
-        val sentence = book.sentences[index]
-        val targetPage = book.pageIndexOfSentence(sentence.id)
+    fun playCollectedWordExample(card: CollectedWordCard) = audioCoordinator.playCollectedWordExample(card)
 
-        stopAudioPlayback()
-        _uiState.update {
-            it.copy(
-                currentPageIndex = targetPage,
-                playingSentenceId = sentence.id,
-                isFullBookPlaying = true,
-                selectedSentenceId = null,
-                inspectedWord = null,
-            )
-        }
-
-        val wav = book.audioFileFor(sentence)
-        if (wav != null) {
-            val player = env.createAudioPlayer()
-            audioPlayer = player
-            player.play(wav) {
-                scope.launch {
-                    if (_uiState.value.isFullBookPlaying) {
-                        delay(220L)
-                        playBookFromSentenceIndex(bookId, index + 1)
-                    }
-                }
-            }
-        } else {
-            env.speakStandardWord(sentence.text)
-            scope.launch {
-                delay((sentence.text.length * 260L).coerceIn(1200L, 4500L))
-                if (_uiState.value.isFullBookPlaying) {
-                    playBookFromSentenceIndex(bookId, index + 1)
-                }
-            }
-        }
+    fun playClauseHistoryEntry(entry: ClauseHistoryEntry) {
+        val wav = entry.wavFile ?: return
+        audioCoordinator.playWavRange(wav, entry.audioSpan?.startMs ?: 0L, entry.audioSpan?.endMs ?: -1L)
     }
 
-    fun playCollectedWordExample(card: CollectedWordCard) {
-        stopAudioPlayback()
-        val f = File(card.sentenceAudioPath)
-        if (f.isFile) {
-            val player = env.createAudioPlayer()
-            audioPlayer = player
-            player.play(f) { scope.launch { stopAudioPlayback() } }
-        } else {
-            env.speakStandardWord(card.word)
-        }
-    }
-
-    fun stopAudioPlayback() {
-        audioPlayer?.stop()
-        audioPlayer = null
-        _uiState.update { it.copy(playingSentenceId = null, isFullBookPlaying = false) }
-    }
-
-    // --- Hands-Free Page Recording & In-Place Voice Editing ---
+    fun stopAudioPlayback() = audioCoordinator.stop()
 
     fun togglePrimaryMicButton() {
         if (_uiState.value.isRecording) {
-            if (System.currentTimeMillis() - micStartedAtMs < 650L) return
-            stopRecording()
+            if (!micCoordinator.canDebounceStop) stopRecording()
         } else {
             startMicWithIntent(MicIntent.WriteAtCursor)
         }
     }
 
-    fun startRespeakSentence(sentenceId: String) {
-        startMicWithIntent(MicIntent.ReplaceSentence(sentenceId))
-    }
+    fun startRespeakClause(clauseId: String) = startMicWithIntent(MicIntent.ReplaceClause(clauseId))
 
-    fun startInsertAfterSentence(sentenceId: String) {
-        _uiState.update { it.copy(cursorAfterSentenceId = sentenceId, selectedSentenceId = null) }
+    fun startInsertAfterClause(clauseId: String) {
+        _uiState.update { it.copy(cursorAfterClauseId = clauseId, selectedClauseId = null) }
         startMicWithIntent(MicIntent.WriteAtCursor)
     }
 
-    fun startRespeakWord(sentenceId: String, span: WordSpan) {
-        startMicWithIntent(MicIntent.ReplaceWord(sentenceId, span.startCharIndex, span.endCharIndex))
+    fun startRespeakWord(clauseId: String, span: WordSpan) =
+        startMicWithIntent(MicIntent.ReplaceWord(clauseId, span.startCharIndex, span.endCharIndex))
+
+    fun startVoiceRevision(clauseId: String) {
+        if (!isAiConfigured) return
+        _uiState.update { it.copy(selectedClauseId = null, inspectedWord = null) }
+        startMicWithIntent(MicIntent.VoiceRevision(clauseId))
     }
 
-    fun startSpeakBookTitle() {
-        startMicWithIntent(MicIntent.SpeakBookTitle)
+    fun submitVoiceRevision(clauseId: String, instruction: String) {
+        val bookId = _uiState.value.activeBookId ?: return
+        aiCoordinator.submitVoiceRevision(bookId, clauseId, instruction)
     }
+
+    fun illustrateCurrentPage() = aiCoordinator.illustrateCurrentPage()
+
+    fun triggerVoiceSpark() = aiCoordinator.triggerVoiceSpark()
+
+    fun startSpeakBookTitle() = startMicWithIntent(MicIntent.SpeakBookTitle)
 
     private fun startMicWithIntent(intent: MicIntent) {
         stopAudioPlayback()
-        val permGate = ensureMicPermission
-        if (permGate != null) {
-            permGate { launchMicInternal(intent) }
-        } else {
-            launchMicInternal(intent)
-        }
+        _uiState.update { it.copy(activeSparkQuestion = null) }
+        micCoordinator.startWithIntent(_uiState.value.activeBookId, intent)
     }
 
-    private fun launchMicInternal(intent: MicIntent) {
-        if (_uiState.value.isRecording) stopRecording()
-        val bookId = _uiState.value.activeBookId ?: return
+    fun stopRecording() = micCoordinator.stopRecording()
 
-        val singleShot = intent !is MicIntent.WriteAtCursor
-        val mic = env.createPcmMic()
-        val stream = UtteranceStreamRecorder(
-            authRepo = authRepo,
-            httpClient = httpClient,
-            newTempWavFile = { repo.newStagingWav() },
-            singleUtteranceMode = singleShot,
-            onLiveDraft = { draft, level ->
-                _uiState.update { st ->
-                    if (!st.isRecording) st else st.copy(
-                        liveDraftText = draft,
-                        voiceEnergy = if (level > 0f) level else st.voiceEnergy * 0.85f,
-                    )
-                }
-            },
-            onUtteranceCommitted = { text, wavFile, durSec ->
-                handleCommittedUtterance(bookId, intent, text, wavFile, durSec)
-            },
-            onAutoFinishedSingle = {
-                scope.launch { finishSingleShotCleanup() }
-            },
-            onError = { err ->
-                scope.launch { postNotice(err) }
-            },
-        )
-
-        try {
-            mic.start { bytes, len -> stream.pushMicPcm(bytes, len) }
-            env.setKeepScreenAwake(true)
-            pcmMic = mic
-            streamRecorder = stream
-            micStartedAtMs = System.currentTimeMillis()
-            _uiState.update {
-                it.copy(
-                    activeMicIntent = intent,
-                    liveDraftText = "",
-                    voiceEnergy = 0f,
-                    inspectedWord = if (intent is MicIntent.ReplaceWord) it.inspectedWord else null,
-                )
-            }
-        } catch (e: Exception) {
-            stream.cancel()
-            env.setKeepScreenAwake(false)
-            postNotice(e.message ?: "无法开启麦克风")
-        }
-    }
-
-    private fun handleCommittedUtterance(
-        bookId: String,
-        intent: MicIntent,
-        text: String,
-        wavFile: File,
-        durSec: Double,
-    ) {
-        scope.launch(Dispatchers.IO) {
-            when (intent) {
-                is MicIntent.WriteAtCursor -> {
-                    val prevPageCount = repo.getBook(bookId)?.paginate()?.size ?: 1
-                    val afterId = _uiState.value.cursorAfterSentenceId
-                    val (updatedBook, newClip) = repo.insertSentenceClip(
-                        bookId = bookId,
-                        afterSentenceId = afterId,
-                        rawText = text,
-                        tempWavFile = wavFile,
-                        durationSec = durSec,
-                    )
-                    val newPages = updatedBook.paginate()
-                    val clipPage = updatedBook.pageIndexOfSentence(newClip.id)
-                    val openedNewPage = newPages.size > prevPageCount
-                    val allBooks = repo.listBooks()
-
-                    _uiState.update {
-                        it.copy(
-                            books = allBooks,
-                            cursorAfterSentenceId = newClip.id,
-                            currentPageIndex = clipPage,
-                            newlyStampedPage = if (openedNewPage) clipPage else it.newlyStampedPage,
-                        )
-                    }
-                    if (openedNewPage) {
-                        delay(1600L)
-                        _uiState.update { it.copy(newlyStampedPage = null) }
-                    }
-                }
-                is MicIntent.ReplaceSentence -> {
-                    repo.replaceSentenceClip(bookId, intent.sentenceId, text, wavFile, durSec)
-                    val allBooks = repo.listBooks()
-                    _uiState.update {
-                        it.copy(books = allBooks, selectedSentenceId = null)
-                    }
-                }
-                is MicIntent.ReplaceWord -> {
-                    wavFile.delete()
-                    repo.replaceRangeInSentence(bookId, intent.sentenceId, intent.startIdx, intent.endIdx, text)
-                    val allBooks = repo.listBooks()
-                    _uiState.update {
-                        it.copy(books = allBooks, inspectedWord = null)
-                    }
-                }
-                is MicIntent.SpeakBookTitle -> {
-                    repo.updateBookTitleAndCover(bookId = bookId, newTitle = text, titleTempWav = wavFile)
-                    val allBooks = repo.listBooks()
-                    _uiState.update { it.copy(books = allBooks) }
-                }
-            }
-        }
-    }
-
-    private fun finishSingleShotCleanup() {
-        pcmMic?.stop()
-        pcmMic = null
-        streamRecorder = null
-        env.setKeepScreenAwake(false)
-        _uiState.update { it.copy(activeMicIntent = null, liveDraftText = "", voiceEnergy = 0f) }
-    }
-
-    fun stopRecording() {
-        val mic = pcmMic
-        val rec = streamRecorder
-        pcmMic = null
-        streamRecorder = null
-        env.setKeepScreenAwake(false)
-
-        _uiState.update { it.copy(activeMicIntent = null, liveDraftText = "", voiceEnergy = 0f) }
-        scope.launch(Dispatchers.IO) {
-            mic?.stop()
-            rec?.finishGracefully(5000L)
-        }
-    }
-
-    fun eraseSentence(sentenceId: String) {
+    fun eraseClause(clauseId: String) {
         val book = _uiState.value.activeBook ?: return
-        val idx = book.sentences.indexOfFirst { it.id == sentenceId }
+        val idx = book.clauses.indexOfFirst { it.id == clauseId }
         if (idx < 0) return
-        val prevId = if (idx == 0) "__START__" else book.sentences[idx - 1].id
+        val prevId = if (idx == 0) "__START__" else book.clauses[idx - 1].id
         stopAudioPlayback()
-
         scope.launch(Dispatchers.IO) {
-            val res = repo.removeSentence(book.id, sentenceId) ?: return@launch
-            val (updated, removedClip) = res
+            val res = dispatchUserTool(ToolId.ERASE_CLAUSE, "bookId" to book.id, "clauseId" to clauseId) ?: return@launch
+            val updated = res.book ?: return@launch
+            val undo = (res.data["removedClause"] as? Clause)?.let { UndoDeletedClause(book.id, prevId, it) }
             val maxPage = (updated.paginate().size - 1).coerceAtLeast(0)
-            val undo = removedClip?.let { UndoDeletedSentence(book.id, prevId, it) }
-            _uiState.update {
+            refreshBookState(book.id) {
                 it.copy(
-                    books = repo.listBooks(),
-                    currentPageIndex = it.currentPageIndex.coerceAtMost(maxPage),
-                    selectedSentenceId = null,
-                    cursorAfterSentenceId = if (prevId == "__START__") null else prevId,
-                    undoBanner = undo,
+                    currentPageIndex = it.currentPageIndex.coerceAtMost(maxPage), selectedClauseId = null,
+                    cursorAfterClauseId = if (prevId == "__START__") null else prevId,
+                    undoBanner = undo, lastMotionEvent = UiMotionEvent.ClauseErased(clauseId),
                 )
             }
             if (undo != null) {
@@ -473,116 +313,144 @@ class BookStudioController(
         }
     }
 
-    fun undoEraseSentence() {
+    fun undoEraseClause() {
         val undo = _uiState.value.undoBanner ?: return
         _uiState.update { it.copy(undoBanner = null) }
         scope.launch(Dispatchers.IO) {
-            val folder = File(File(env.storageRoot, "books"), undo.bookId)
-            val existingWav = if (undo.clip.audioFileName.isNotBlank()) File(folder, undo.clip.audioFileName) else null
-            repo.insertSentenceClip(
-                bookId = undo.bookId,
-                afterSentenceId = undo.afterSentenceId,
-                rawText = undo.clip.text,
-                tempWavFile = existingWav,
-                durationSec = undo.clip.durationSec,
-                forceParagraphBreak = undo.clip.paragraphBreakAfter,
-            )
-            _uiState.update { it.copy(books = repo.listBooks()) }
+            val snap = repo.timeMachine.listSnapshots(undo.bookId).firstOrNull { s -> s.clauses.any { it.id == undo.clause.id } }
+            if (snap != null) {
+                dispatchUserTool(ToolId.RESTORE_HISTORY_SNAPSHOT, "bookId" to undo.bookId, "snapshotId" to snap.id, "clauseId" to undo.clause.id)
+            } else {
+                val folder = File(File(env.storageRoot, "books"), undo.bookId)
+                val sp = undo.clause.audioSpan
+                val take = sp?.let { repo.getBook(undo.bookId)?.takeById(it.takeId) }
+                dispatchUserTool(
+                    ToolId.INSERT_CLAUSE_AFTER, "bookId" to undo.bookId, "afterClauseId" to undo.afterClauseId,
+                    "text" to undo.clause.text, "takeId" to sp?.takeId.orEmpty(),
+                    "takeFile" to take?.let { File(folder, it.wavFileName) },
+                    "uttStartMs" to (sp?.startMs ?: 0L), "uttEndMs" to (sp?.endMs ?: 0L),
+                    "takeDurationMs" to (take?.durationMs ?: 0L), "paragraphBreakAfter" to undo.clause.paragraphBreakAfter,
+                )
+            }
+            refreshBookState(undo.bookId)
         }
     }
 
-    // --- Word Inspection (`田字格字卡`) & Word Box ---
+    fun findClauseHistory(clauseId: String): List<ClauseHistoryEntry> =
+        _uiState.value.activeBook?.let { repo.timeMachine.findClauseHistory(it, clauseId) }.orEmpty()
 
-    fun onCharacterTapped(sentence: SentenceClip, charIndexInSentence: Int) {
+    fun openTimeMachine(clauseId: String? = null) {
+        stopAudioPlayback()
+        val bookId = _uiState.value.activeBookId ?: return
+        val snaps = repo.timeMachine.listSnapshots(bookId)
+        _uiState.update { it.copy(timeMachineSnapshots = snaps, isTimeMachineOpen = true, timeMachineTargetClauseId = clauseId, selectedClauseId = null, inspectedWord = null, activeSparkQuestion = null) }
+    }
+
+    fun closeTimeMachine() { stopAudioPlayback(); _uiState.update { it.copy(isTimeMachineOpen = false, timeMachineTargetClauseId = null) } }
+    fun restoreSnapshot(snapshotId: String) = restoreHistory(snapshotId, clauseId = null)
+    fun restoreClauseFromSnapshot(snapshotId: String, clauseId: String) = restoreHistory(snapshotId, clauseId)
+
+    private fun restoreHistory(snapshotId: String, clauseId: String?) {
+        val bookId = _uiState.value.activeBookId ?: return
+        stopAudioPlayback()
+        scope.launch(Dispatchers.IO) {
+            val params = buildList { add("bookId" to bookId); add("snapshotId" to snapshotId); if (clauseId != null) add("clauseId" to clauseId) }
+            dispatchUserTool(ToolId.RESTORE_HISTORY_SNAPSHOT, *params.toTypedArray())
+            refreshBookState(bookId) { st ->
+                val maxPage = ((st.activeBook?.paginate()?.size ?: 1) - 1).coerceAtLeast(0)
+                st.copy(currentPageIndex = st.currentPageIndex.coerceAtMost(maxPage), selectedClauseId = null, inspectedWord = null, isTimeMachineOpen = false, timeMachineTargetClauseId = null)
+            }
+        }
+    }
+
+    fun toggleParagraphBreak(clauseId: String) {
+        val bookId = _uiState.value.activeBookId ?: return
+        scope.launch(Dispatchers.IO) { dispatchUserTool(ToolId.TOGGLE_PARAGRAPH_BREAK, "bookId" to bookId, "clauseId" to clauseId); refreshBookState(bookId) }
+    }
+
+    fun selectPageIllustration(pageIndex: Int, illustrationId: String) {
+        val bookId = _uiState.value.activeBookId ?: return
+        scope.launch(Dispatchers.IO) { dispatchUserTool(ToolId.SELECT_PAGE_ILLUSTRATION, "bookId" to bookId, "pageIndex" to pageIndex, "illustrationId" to illustrationId); refreshBookState(bookId) }
+    }
+
+    fun onCharacterTapped(clause: Clause, charIndexInClause: Int) {
         if (_uiState.value.isRecording) return
-        val span = LiteracyEngine.findWordAt(sentence.text, charIndexInSentence) ?: return
+        val span = LiteracyEngine.findWordAt(clause.text, charIndexInClause, clause.contextualPhrases) ?: return
         val homophones = LiteracyEngine.suggestHomophones(span.word, span.pinyins)
+        val validAnns = clause.softAnnotations.filter { it.charIndex >= 0 && it.length > 0 && !it.suggestedWord.isNullOrBlank() }
+        val softAnn = validAnns.firstOrNull { charIndexInClause in it.charIndex until (it.charIndex + it.length) }
+            ?: validAnns.firstOrNull { it.charIndex < span.endCharIndex && (it.charIndex + it.length) > span.startCharIndex }
+        val lastIdx = (span.word.length - 1).coerceAtLeast(0)
+        val inspection = ActiveWordInspection(
+            clauseId = clause.id, span = span, homophones = homophones, softSuggestion = softAnn?.suggestedWord,
+            initialCharIndexInWord = (charIndexInClause - span.startCharIndex).coerceIn(0, lastIdx),
+            softAnnotationOffsetInWord = softAnn?.let { (it.charIndex - span.startCharIndex).coerceIn(0, lastIdx) },
+            softAnnotationLength = softAnn?.length ?: 0,
+        )
         env.speakStandardWord(span.word)
-        _uiState.update {
-            it.copy(
-                selectedSentenceId = null,
-                inspectedWord = ActiveWordInspection(
-                    sentenceId = sentence.id,
-                    span = span,
-                    homophones = homophones,
-                ),
-            )
-        }
+        _uiState.update { it.copy(selectedClauseId = null, inspectedWord = inspection, activeSparkQuestion = null) }
     }
 
-    fun applyHomophoneReplacement(inspection: ActiveWordInspection, candidate: String) {
-        val bookId = _uiState.value.activeBookId ?: return
-        scope.launch(Dispatchers.IO) {
-            repo.replaceRangeInSentence(
-                bookId = bookId,
-                sentenceId = inspection.sentenceId,
-                startIdx = inspection.span.startCharIndex,
-                endIdx = inspection.span.endCharIndex,
-                replacementWord = candidate,
-            )
-            _uiState.update {
-                it.copy(books = repo.listBooks(), inspectedWord = null)
-            }
-        }
-    }
+    fun applyHomophoneReplacement(inspection: ActiveWordInspection, candidate: String) =
+        replaceSpan(inspection.clauseId, inspection.span.startCharIndex, inspection.span.endCharIndex, candidate)
 
-    fun applySingleCharHomophoneReplacement(
-        inspection: ActiveWordInspection,
-        charOffsetInWord: Int,
-        candidateChar: String,
-    ) {
-        val bookId = _uiState.value.activeBookId ?: return
+    fun applySingleCharHomophoneReplacement(inspection: ActiveWordInspection, charOffsetInWord: Int, candidateChar: String) {
         val charStart = inspection.span.startCharIndex + charOffsetInWord
-        if (charStart !in inspection.span.startCharIndex until inspection.span.endCharIndex) return
+        if (charStart in inspection.span.startCharIndex until inspection.span.endCharIndex) replaceSpan(inspection.clauseId, charStart, charStart + 1, candidateChar)
+    }
+
+    fun applyClauseSpanReplacement(clauseId: String, startIndex: Int, endIndex: Int, replacement: String) =
+        replaceSpan(clauseId, startIndex, endIndex, replacement)
+
+    private fun replaceSpan(clauseId: String, startIdx: Int, endIdx: Int, replacement: String) {
+        val bookId = _uiState.value.activeBookId ?: return
         scope.launch(Dispatchers.IO) {
-            repo.replaceRangeInSentence(
-                bookId = bookId,
-                sentenceId = inspection.sentenceId,
-                startIdx = charStart,
-                endIdx = charStart + 1,
-                replacementWord = candidateChar,
-            )
-            _uiState.update {
-                it.copy(books = repo.listBooks(), inspectedWord = null)
-            }
+            dispatchUserTool(ToolId.REPLACE_SPAN, "bookId" to bookId, "clauseId" to clauseId, "startIndex" to startIdx, "endIndex" to endIdx, "replacement" to replacement)
+            refreshBookState(bookId) { it.copy(inspectedWord = null) }
         }
     }
 
     fun toggleCollectWord(inspection: ActiveWordInspection) {
         val book = _uiState.value.activeBook ?: return
-        val sentence = book.sentences.firstOrNull { it.id == inspection.sentenceId } ?: return
+        val clause = book.clauses.firstOrNull { it.id == inspection.clauseId } ?: return
+        val alreadyCollected = _uiState.value.collectedWords.any { it.word == inspection.span.word }
         scope.launch(Dispatchers.IO) {
-            val (updatedWords, _) = repo.toggleCollectWord(
-                word = inspection.span.word,
-                pinyins = inspection.span.pinyins,
-                book = book,
-                sentence = sentence,
-            )
-            _uiState.update { it.copy(collectedWords = updatedWords) }
+            val (updatedWords, added) = if (!alreadyCollected) {
+                val res = dispatchUserTool(ToolId.ADD_WORD_BOX_CARD, "bookId" to book.id, "clauseId" to clause.id, "word" to inspection.span.word, "pinyins" to inspection.span.pinyins)
+                @Suppress("UNCHECKED_CAST")
+                val words = res?.data?.get("collectedWords") as? List<CollectedWordCard> ?: repo.listCollectedWords()
+                words to (res?.data?.get("added") as? Boolean ?: false)
+            } else repo.toggleCollectWord(inspection.span.word, inspection.span.pinyins, book, clause)
+            _uiState.update { it.copy(collectedWords = updatedWords, lastMotionEvent = if (added) UiMotionEvent.WordBookmarked(inspection.span.word) else it.lastMotionEvent) }
         }
     }
 
+    fun updateBookBible(bookId: String, traits: List<String> = emptyList(), scenesAndProps: List<String> = emptyList(), plotSummary: String? = null) {
+        scope.launch(Dispatchers.IO) {
+            dispatchUserTool(ToolId.UPDATE_BOOK_BIBLE, "bookId" to bookId, "protagonistTraits" to traits, "keyScenesAndProps" to scenesAndProps, "plotSummary" to plotSummary)
+            refreshBookState(bookId)
+        }
+    }
+
+    fun openParentSettings() = aiSettings.open()
+    fun closeParentSettings() = aiSettings.close()
+    fun saveAiConfig(config: AiGatewayConfig) = aiSettings.save(config)
+    fun clearAiConfig() = aiSettings.clear()
+    fun resetAiConfigToDefaults() = aiSettings.resetToDefaults()
+    suspend fun testAiConnection(config: AiGatewayConfig): AiConnectionTestResult = aiSettings.testConnection(config)
+    fun testAiConnectivity(config: AiGatewayConfig) = aiSettings.testConnectivity(config)
+
     fun deleteBook(bookId: String) {
-        stopAllAudioAndMic()
+        stopAllAudioAndMic(); aiCoordinator.cancelForBook(bookId)
         scope.launch(Dispatchers.IO) {
             repo.deleteBook(bookId)
-            _uiState.update {
-                it.copy(
-                    books = repo.listBooks(),
-                    destination = StudioDestination.SHELF,
-                    activeBookId = null,
-                )
+            _uiState.update { st ->
+                val base = if (st.activeBookId == bookId) st.withResetOverlayState(StudioDestination.SHELF, null) else st
+                base.copy(books = repo.listBooks())
             }
         }
     }
 
-    private fun stopAllAudioAndMic() {
-        stopAudioPlayback()
-        if (_uiState.value.isRecording) stopRecording()
-    }
-
-    fun dispose() {
-        stopAllAudioAndMic()
-        scope.cancel()
-    }
+    private fun stopAllAudioAndMic() { stopAudioPlayback(); if (_uiState.value.isRecording) stopRecording() }
+    fun dispose() { stopAllAudioAndMic(); aiCoordinator.cancelAll(); scope.cancel() }
 }

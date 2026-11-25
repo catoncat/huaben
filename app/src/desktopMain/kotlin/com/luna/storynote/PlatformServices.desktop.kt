@@ -2,11 +2,20 @@ package com.luna.storynote
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
+import com.luna.storynote.audio.FrontierProtocol
+import com.luna.storynote.model.AiGatewayConfig
+import com.luna.storynote.model.StoryBook
+import org.jetbrains.skia.Image as SkiaImage
+import org.json.JSONObject
 import java.awt.Desktop
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
@@ -17,6 +26,15 @@ import javax.sound.sampled.TargetDataLine
 @Composable
 actual fun rememberPlatformBookFontFamily(): FontFamily = remember {
     loadDesktopBookFontFamily()
+}
+
+actual fun decodeFileToImageBitmap(file: File): ImageBitmap? {
+    if (!file.isFile || !file.canRead() || file.length() <= 0L) return null
+    return try {
+        SkiaImage.makeFromEncoded(file.readBytes()).toComposeImageBitmap()
+    } catch (_: Throwable) {
+        null
+    }
 }
 
 fun loadDesktopBookFontFamily(): FontFamily {
@@ -35,8 +53,11 @@ fun loadDesktopBookFontFamily(): FontFamily {
 class DesktopPlatformEnvironment(
     override val storageRoot: File = File(System.getProperty("user.home"), ".local/share/story-note-v3").apply { mkdirs() },
     override val authCacheFile: File = File(System.getProperty("user.home"), ".config/story-note/doubao_auth.json"),
+    override val privateConfigDir: File = File(System.getProperty("user.home"), ".config/story-note").apply { mkdirs() },
+    private val piAgentDir: File = File(System.getProperty("user.home"), ".pi/agent"),
 ) : PlatformEnvironment {
     private var activeSayProcess: Process? = null
+    private val sayVoice: String? by lazy { resolveMandarinSayVoice() }
 
     override fun createPcmMic(): PlatformPcmMic = DesktopPcmMic()
 
@@ -46,8 +67,70 @@ class DesktopPlatformEnvironment(
         if (word.isBlank()) return
         try {
             activeSayProcess?.destroy()
-            activeSayProcess = ProcessBuilder("/usr/bin/say", "-r", "165", word).start()
+            val cmd = buildList {
+                add("/usr/bin/say")
+                sayVoice?.let {
+                    add("-v")
+                    add(it)
+                }
+                add("-r")
+                add("165")
+                add(word)
+            }
+            activeSayProcess = ProcessBuilder(cmd).start()
         } catch (_: Exception) {
+        }
+    }
+
+    override fun stopSpeaking() {
+        try {
+            activeSayProcess?.destroyForcibly()
+        } catch (_: Exception) {
+        }
+        activeSayProcess = null
+    }
+
+    override fun loadDefaultAiConfig(): AiGatewayConfig {
+        val modelsFile = File(piAgentDir, "models.json")
+        if (!modelsFile.isFile) return AiGatewayConfig()
+        return try {
+            val modelsJson = JSONObject(modelsFile.readText(Charsets.UTF_8))
+            val magpie = modelsJson.optJSONObject("providers")?.optJSONObject("magpie-railway")
+                ?: return AiGatewayConfig()
+            val baseUrl = magpie.optString("baseUrl", "").trim()
+            val apiKey = magpie.optString("apiKey", "").trim()
+            if (baseUrl.isEmpty() || apiKey.isEmpty()) return AiGatewayConfig()
+
+            val settingsFile = File(piAgentDir, "settings.json")
+            val defaultModel = if (settingsFile.isFile) {
+                try {
+                    val settingsObj = JSONObject(settingsFile.readText(Charsets.UTF_8))
+                    val defaultProvider = settingsObj.optString("defaultProvider", "").trim()
+                    if (defaultProvider.isEmpty() || defaultProvider == "magpie-railway") {
+                        settingsObj.optString("defaultModel", "").trim()
+                    } else {
+                        ""
+                    }
+                } catch (_: Exception) {
+                    ""
+                }
+            } else {
+                ""
+            }
+            val fallbackModel = magpie.optJSONArray("models")
+                ?.optJSONObject(0)
+                ?.optString("id", "")
+                ?.trim()
+                .orEmpty()
+            val textModel = defaultModel.ifEmpty { fallbackModel.ifEmpty { "auto/deepseek-v4.1-flash" } }
+            AiGatewayConfig(
+                baseUrl = baseUrl,
+                apiKey = apiKey,
+                textModel = textModel,
+                imageModel = "codex/gpt-image-2",
+            )
+        } catch (_: Exception) {
+            AiGatewayConfig()
         }
     }
 
@@ -62,6 +145,23 @@ class DesktopPlatformEnvironment(
                 Desktop.getDesktop().open(book.bookDir)
             }
         } catch (_: Exception) {
+        }
+    }
+
+    private fun resolveMandarinSayVoice(): String? {
+        return try {
+            val proc = ProcessBuilder("/usr/bin/say", "-v", "?").redirectErrorStream(true).start()
+            val lines = proc.inputStream.bufferedReader(Charsets.UTF_8).readLines()
+            proc.waitFor()
+            val voices = lines.mapNotNull { line ->
+                val parts = line.trim().split(Regex("\\s+"))
+                if (parts.size >= 2) parts[0] to parts[1] else null
+            }
+            voices.firstOrNull { it.first.equals("Tingting", ignoreCase = true) }?.first
+                ?: voices.firstOrNull { it.second.startsWith("zh_CN", ignoreCase = true) || it.second.startsWith("zh-CN", ignoreCase = true) }?.first
+                ?: voices.firstOrNull { it.second.startsWith("zh", ignoreCase = true) }?.first
+        } catch (_: Exception) {
+            null
         }
     }
 }
@@ -114,30 +214,227 @@ private class DesktopPcmMic : PlatformPcmMic {
 }
 
 private class DesktopWavPlayer : PlatformAudioPlayer {
-    private var clip: Clip? = null
+    private val lock = Any()
+    private val playLock = Any()
+    private val clipCloser = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "desktop-wav-clip-closer").apply { isDaemon = true }
+    }
 
-    override fun play(wavFile: File, onCompleted: () -> Unit) {
-        stop()
-        val stream = AudioSystem.getAudioInputStream(wavFile)
-        val c = AudioSystem.getClip()
-        c.open(stream)
-        c.addLineListener { ev ->
-            if (ev.type == LineEvent.Type.STOP && c.microsecondPosition >= c.microsecondLength - 50_000L) {
-                onCompleted()
+    private var clip: Clip? = null
+    private var currentToken: Any? = null
+    private var manuallyStopped = false
+    private var activePlaying = false
+    private var watcherThread: Thread? = null
+
+    private fun closeClipAsync(c: Clip) {
+        try {
+            clipCloser.execute {
+                try { c.close() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+            try { c.close() } catch (_: Exception) {}
+        }
+    }
+
+    override fun playRange(wavFile: File, startMs: Long, endMs: Long, onCompleted: () -> Unit) {
+        var immediateCompletionToFire: (() -> Unit)? = null
+        synchronized(playLock) {
+            stop()
+            if (!wavFile.isFile || !wavFile.canRead() || wavFile.length() <= 44L) {
+                return
+            }
+            val token = Any()
+            synchronized(lock) {
+                currentToken = token
+                manuallyStopped = false
+            }
+            val completedFired = AtomicBoolean(false)
+
+            var openedClip: Clip? = null
+            var installed = false
+            try {
+                val c: Clip = AudioSystem.getAudioInputStream(wavFile).use { stream ->
+                    val candidate = AudioSystem.getClip()
+                    openedClip = candidate
+                    candidate.open(stream)
+                    candidate
+                }
+                val totalUs = c.microsecondLength.coerceAtLeast(0L)
+                val startUs = (startMs.coerceAtLeast(0L) * 1000L).coerceIn(0L, totalUs)
+                val targetEndUs = if (endMs <= 0L) totalUs else (endMs * 1000L).coerceIn(startUs, totalUs)
+
+                if (totalUs <= 0L || targetEndUs <= startUs + 5_000L) {
+                    closeClipAsync(c)
+                    openedClip = null
+                    val shouldComplete = synchronized(lock) {
+                        val active = !manuallyStopped && currentToken === token
+                        if (currentToken === token) {
+                            currentToken = null
+                            activePlaying = false
+                        }
+                        active
+                    }
+                    if (shouldComplete && completedFired.compareAndSet(false, true)) {
+                        immediateCompletionToFire = onCompleted
+                    }
+                    return@synchronized
+                }
+
+                c.microsecondPosition = startUs
+                c.addLineListener { ev ->
+                    if (ev.type == LineEvent.Type.STOP) {
+                        var clipToClose: Clip? = null
+                        var shouldNotify = false
+                        synchronized(lock) {
+                            if (currentToken === token && clip === c) {
+                                activePlaying = false
+                                if (!manuallyStopped && c.microsecondPosition >= (targetEndUs - 45_000L)) {
+                                    shouldNotify = true
+                                    if (endMs <= 0L) {
+                                        clip = null
+                                        currentToken = null
+                                        clipToClose = c
+                                    }
+                                }
+                            }
+                        }
+                        clipToClose?.let { closeClipAsync(it) }
+                        if (shouldNotify && completedFired.compareAndSet(false, true)) {
+                            onCompleted()
+                        }
+                    }
+                }
+
+                val wt: Thread? = if (endMs > 0L) {
+                    Thread(
+                        {
+                            try {
+                                while (true) {
+                                    val stillActive = synchronized(lock) {
+                                        !manuallyStopped && currentToken === token && clip === c
+                                    }
+                                    if (!stillActive) return@Thread
+                                    val posUs = c.microsecondPosition
+                                    if (posUs >= targetEndUs || (!c.isActive && posUs > startUs)) {
+                                        break
+                                    }
+                                    Thread.sleep(15L)
+                                }
+                                val ownsClip = synchronized(lock) {
+                                    if (manuallyStopped || currentToken !== token || clip !== c) {
+                                        false
+                                    } else {
+                                        clip = null
+                                        currentToken = null
+                                        if (watcherThread === Thread.currentThread()) {
+                                            watcherThread = null
+                                        }
+                                        activePlaying = false
+                                        true
+                                    }
+                                }
+                                if (ownsClip) {
+                                    try { c.stop() } catch (_: Exception) {}
+                                    closeClipAsync(c)
+                                    if (completedFired.compareAndSet(false, true)) {
+                                        onCompleted()
+                                    }
+                                }
+                            } catch (_: InterruptedException) {
+                            }
+                        },
+                        "desktop-wav-range-watcher",
+                    ).apply {
+                        isDaemon = true
+                    }
+                } else {
+                    null
+                }
+
+                val canStart = synchronized(lock) {
+                    if (manuallyStopped || currentToken !== token) {
+                        false
+                    } else {
+                        clip = c
+                        activePlaying = true
+                        watcherThread = wt
+                        installed = true
+                        true
+                    }
+                }
+                if (!canStart) {
+                    closeClipAsync(c)
+                    openedClip = null
+                    return@synchronized
+                }
+
+                c.start()
+                wt?.start()
+            } catch (_: Throwable) {
+                if (!installed) {
+                    synchronized(lock) {
+                        if (currentToken === token) {
+                            currentToken = null
+                            activePlaying = false
+                        }
+                    }
+                    openedClip?.let {
+                        try { it.stop() } catch (_: Exception) {}
+                        closeClipAsync(it)
+                    }
+                } else {
+                    var detachedClip: Clip? = null
+                    var detachedWt: Thread? = null
+                    synchronized(lock) {
+                        if (currentToken === token && clip === openedClip) {
+                            detachedClip = clip
+                            clip = null
+                            detachedWt = watcherThread
+                            watcherThread = null
+                            activePlaying = false
+                            currentToken = null
+                        }
+                    }
+                    detachedClip?.let {
+                        try { it.stop() } catch (_: Exception) {}
+                        closeClipAsync(it)
+                    }
+                    val wt = detachedWt
+                    if (wt != null && wt !== Thread.currentThread()) {
+                        wt.interrupt()
+                        try { wt.join(150L) } catch (_: InterruptedException) {}
+                    }
+                }
             }
         }
-        c.start()
-        clip = c
+        immediateCompletionToFire?.invoke()
     }
 
     override fun stop() {
-        clip?.let {
-            try { it.stop() } catch (_: Exception) {}
-            try { it.close() } catch (_: Exception) {}
+        var detachedClip: Clip? = null
+        var detachedWt: Thread? = null
+        synchronized(lock) {
+            manuallyStopped = true
+            activePlaying = false
+            currentToken = null
+            detachedClip = clip
+            clip = null
+            detachedWt = watcherThread
+            watcherThread = null
         }
-        clip = null
+        detachedClip?.let {
+            try { it.stop() } catch (_: Exception) {}
+            closeClipAsync(it)
+        }
+        val wt = detachedWt
+        if (wt != null && wt !== Thread.currentThread()) {
+            wt.interrupt()
+            try { wt.join(150L) } catch (_: InterruptedException) {}
+        }
     }
 
     override val isPlaying: Boolean
-        get() = clip?.isRunning == true
+        get() = synchronized(lock) {
+            activePlaying || clip?.isRunning == true
+        }
 }

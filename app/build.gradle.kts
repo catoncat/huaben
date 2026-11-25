@@ -19,6 +19,12 @@ kotlin {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }
+        compilations {
+            val main by getting
+            create("e2eTest") {
+                associateWith(main)
+            }
+        }
     }
 
     sourceSets {
@@ -31,6 +37,7 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
                 implementation("com.squareup.okhttp3:okhttp:4.12.0")
                 implementation("com.github.houbb:pinyin:0.4.0")
+                implementation("com.huaban:jieba-analysis:1.0.2")
                 compileOnly("org.json:json:20240303")
             }
         }
@@ -55,6 +62,18 @@ kotlin {
                 implementation("org.json:json:20240303")
             }
         }
+        val desktopE2eTest by getting {
+            kotlin.srcDir("src/e2eTest/kotlin")
+            resources.srcDir("src/e2eTest/resources")
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("junit:junit:4.13.2")
+                implementation("org.json:json:20240303")
+                implementation(compose.desktop.currentOs)
+                @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+                implementation(compose.uiTest)
+            }
+        }
     }
 }
 
@@ -67,8 +86,8 @@ android {
         applicationId = "com.luna.storynote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "1.0.0"
     }
 
     buildTypes {
@@ -82,6 +101,25 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    packaging {
+        resources {
+            excludes += listOf("META-INF/LICENSE*", "META-INF/NOTICE*")
+        }
+    }
+}
+
+tasks.register<Test>("e2eTest") {
+    group = "verification"
+    description = "Runs StoryNote opaque-box E2E tests in app/src/e2eTest/kotlin."
+    dependsOn("desktopProcessResources")
+    val desktopTarget = kotlin.jvm("desktop")
+    val mainComp = desktopTarget.compilations.getByName("main")
+    val e2e = desktopTarget.compilations.getByName("e2eTest")
+    testClassesDirs = e2e.output.classesDirs
+    classpath = e2e.runtimeDependencyFiles + e2e.output.allOutputs + mainComp.output.allOutputs
+    jvmArgs("-Djava.awt.headless=true")
+    useJUnit()
 }
 
 compose.desktop {

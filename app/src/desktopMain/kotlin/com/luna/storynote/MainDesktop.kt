@@ -1,46 +1,40 @@
 package com.luna.storynote
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.ImageComposeScene
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.luna.storynote.literacy.HanziStrokeRepository
+import com.luna.storynote.literacy.LiteracyEngine
+import com.luna.storynote.model.ActiveWordInspection
+import com.luna.storynote.model.MicIntent
+import com.luna.storynote.model.SoftAnnotation
+import com.luna.storynote.model.StudioDestination
+import com.luna.storynote.model.StudioUiState
+import com.luna.storynote.storage.StoryBookRepository
 import com.luna.storynote.ui.StoryStudioRoot
+import org.jetbrains.skia.Canvas
+import org.jetbrains.skia.Color as SkColor
 import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Path as SkPath
+import org.jetbrains.skia.Shader
+import org.jetbrains.skia.Surface
 import java.io.File
 import kotlin.io.path.createTempDirectory
 
 fun main(args: Array<String>) {
+    val magpieIdx = args.indexOf("--verify-magpie")
+    if (magpieIdx >= 0 && magpieIdx + 1 < args.size) {
+        runMagpieLiveVerification(File(args[magpieIdx + 1]))
+        return
+    }
     val idx = args.indexOf("--render-preview")
     if (idx >= 0 && idx + 1 < args.size) {
         renderVerificationSuite(File(args[idx + 1]))
@@ -52,7 +46,7 @@ fun main(args: Array<String>) {
     val controller = BookStudioController(env)
 
     application {
-        val windowState = rememberWindowState(size = DpSize(1180.dp, 840.dp))
+        val windowState = rememberWindowState(size = DpSize(1140.dp, 780.dp))
         Window(
             onCloseRequest = {
                 controller.dispose()
@@ -61,62 +55,9 @@ fun main(args: Array<String>) {
             state = windowState,
             title = "小作家故事本",
         ) {
-            var formFactor by remember { mutableIntStateOf(0) } // 0=平板横屏双页, 1=平板竖屏单页, 2=手机
             val uiState by controller.uiState.collectAsState()
-
             MaterialTheme {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFFDAD1C2)),
-                ) {
-                    // Subtle dark studio switcher bar (Desktop preview only — not present in APK)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF221E1A))
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("平板对开 1140", "平板单页 760", "手机 400").forEachIndexed { i, label ->
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (formFactor == i) Color(0xFFD44A2E) else Color(0xFF3A332C),
-                                    modifier = Modifier.clickable { formFactor = i },
-                                ) {
-                                    Text(
-                                        text = label,
-                                        color = Color.White,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        val mod = when (formFactor) {
-                            1 -> Modifier
-                                .padding(12.dp)
-                                .width(760.dp)
-                                .height(980.dp)
-                                .shadow(12.dp, RoundedCornerShape(20.dp))
-                                .clip(RoundedCornerShape(20.dp))
-                            2 -> Modifier
-                                .padding(12.dp)
-                                .width(400.dp)
-                                .height(850.dp)
-                                .shadow(12.dp, RoundedCornerShape(24.dp))
-                                .clip(RoundedCornerShape(24.dp))
-                            else -> Modifier.fillMaxSize()
-                        }
-                        StoryStudioRoot(uiState = uiState, controller = controller, modifier = mod)
-                    }
-                }
+                StoryStudioRoot(uiState = uiState, controller = controller)
             }
         }
     }
@@ -128,102 +69,198 @@ private fun seedShowcaseBookIfEmpty(env: DesktopPlatformEnvironment) {
 
     val b = repo.createBlankBook()
     val demoSentences = listOf(
-        "从前有一只蓝色的小恐龙，他住在一座会喷棉花糖的火山上。",
-        "他慢慢长大了，每天早上最喜欢吃云朵味的冰淇淋。",
-        "有一天晚上，小恐龙看着天上的月亮，觉得月亮像一块圆圆的大饼干。",
-        "突然，一艘银色的飞船落在了家门口！",
-        "飞船里跳出一只聪明的小狐狸，拿着星星地图来找他一起去探险。",
-        "他们坐上飞船穿过彩虹，玩累了才回到温暖的山洞里睡觉。",
+        "小恐龙慢慢的走出了房间，他往前走啊走，走啊走，终于来到了大森林里。",
+        "大森林里的树木绿油油的，阳光穿过树叶洒在软软的草地上。",
+        "突然，一只聪明的小狐狸拿着星星地图跳了出来，邀请小恐龙一起去河边探险。",
+        "他们开心地分享着棉花糖和冰淇淋，玩累了才回到温暖的山洞里睡觉。",
     )
     var afterId: String? = null
     for (s in demoSentences) {
-        val wav = repo.newStagingWav()
-        val w = WavFileStreamWriter(wav)
-        w.appendSilenceMs(1800)
-        w.close()
-        val (_, clip) = repo.insertSentenceClip(b.id, afterId, s, wav, 1.8)
+        val (_, clip) = repo.insertSentenceClip(b.id, afterId, s, tempWavFile = null, durationSec = 0.0)
         afterId = clip.id
     }
-    repo.updateBookTitleAndCover(b.id, newTitle = "蓝色小恐龙与飞船", coverColorIndex = 0, emblemIndex = 1)
+    repo.updateBookTitleAndCover(b.id, newTitle = "小恐龙来到了大森林里", coverColorIndex = 0, emblemIndex = 1)
     val fullBook = repo.getBook(b.id)!!
-    repo.toggleCollectWord("恐龙", listOf("kǒng", "lóng"), fullBook, fullBook.sentences[0])
-    repo.toggleCollectWord("飞船", listOf("fēi", "chuán"), fullBook, fullBook.sentences[3])
+    val dinoClause = fullBook.clauses.first()
+    val forestClause = fullBook.clauses.firstOrNull { it.text.contains("大森林") } ?: fullBook.clauses.last()
+    repo.toggleCollectWord("小恐龙", listOf("xiǎo", "kǒng", "lóng"), fullBook, dinoClause)
+    repo.toggleCollectWord("大森林", listOf("dà", "sēn", "lín"), fullBook, forestClause)
+}
+
+private fun createSampleWatercolorPng(targetFile: File, width: Int = 720, height: Int = 540) {
+    targetFile.parentFile?.mkdirs()
+    val surface = Surface.makeRasterN32Premul(width, height)
+    val c: Canvas = surface.canvas
+    val skyPaint = Paint().apply {
+        shader = Shader.makeLinearGradient(
+            0f, 0f, 0f, height.toFloat(),
+            intArrayOf(SkColor.makeRGB(248, 236, 212), SkColor.makeRGB(228, 236, 224), SkColor.makeRGB(246, 226, 200)),
+        )
+    }
+    c.drawRect(org.jetbrains.skia.Rect.makeWH(width.toFloat(), height.toFloat()), skyPaint)
+    // Soft moon
+    c.drawCircle(width * 0.78f, height * 0.22f, 52f, Paint().apply { color = SkColor.makeARGB(220, 252, 238, 178) })
+    // Gentle hills
+    val hill = SkPath().apply {
+        moveTo(0f, height * 0.72f)
+        cubicTo(width * 0.28f, height * 0.50f, width * 0.62f, height * 0.80f, width.toFloat(), height * 0.62f)
+        lineTo(width.toFloat(), height.toFloat())
+        lineTo(0f, height.toFloat())
+        closePath()
+    }
+    c.drawPath(hill, Paint().apply { color = SkColor.makeARGB(200, 148, 186, 154) })
+    // Volcano cone + marshmallow cloud
+    val volcano = SkPath().apply {
+        moveTo(width * 0.16f, height * 0.78f)
+        lineTo(width * 0.30f, height * 0.42f)
+        lineTo(width * 0.44f, height * 0.42f)
+        lineTo(width * 0.58f, height * 0.78f)
+        closePath()
+    }
+    c.drawPath(volcano, Paint().apply { color = SkColor.makeARGB(220, 198, 146, 120) })
+    hill.close()
+    volcano.close()
+    val puff = Paint().apply { color = SkColor.makeARGB(235, 254, 245, 238) }
+    c.drawCircle(width * 0.35f, height * 0.31f, 36f, puff)
+    c.drawCircle(width * 0.41f, height * 0.28f, 44f, puff)
+    c.drawCircle(width * 0.47f, height * 0.32f, 34f, puff)
+    // Little blue dinosaur silhouette
+    val dinoPaint = Paint().apply { color = SkColor.makeARGB(240, 74, 134, 178) }
+    c.drawCircle(width * 0.64f, height * 0.68f, 38f, dinoPaint)
+    c.drawCircle(width * 0.69f, height * 0.56f, 24f, dinoPaint)
+    val bytes = surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG)?.bytes
+        ?: throw IllegalStateException("Failed to encode sample watercolor PNG")
+    targetFile.writeBytes(bytes)
+    surface.close()
 }
 
 private fun renderVerificationSuite(outDir: File) {
     outDir.mkdirs()
-    val tmp = createTempDirectory("studio-v3-shots-").toFile()
+    val tmp = createTempDirectory("studio-m3-shots-").toFile()
     try {
         val env = DesktopPlatformEnvironment(storageRoot = tmp)
         HanziStrokeRepository.ensureLoaded { env.openStrokeAssetStream() }
         seedShowcaseBookIfEmpty(env)
+        val repo = StoryBookRepository(env.storageRoot)
+        val illustratedBook = repo.listBooks().first()
+
+        // Create second unillustrated book for landscape unillustrated centered-page shot + fuller shelf
+        val plainBook = repo.createBlankBook()
+        repo.insertSentenceClip(plainBook.id, null, "清晨的露珠挂在叶子上，小鸟在枝头唱起了歌。", tempWavFile = null, durationSec = 0.0)
+        repo.updateBookTitleAndCover(plainBook.id, newTitle = "森林清晨", coverColorIndex = 1, emblemIndex = 3)
+
+        // Seed sample watercolor illustration & SoftAnnotation & TimeMachineSnapshot on illustratedBook
+        val illuFile = File(tmp, "sample_watercolor.png")
+        createSampleWatercolorPng(illuFile)
+        repo.attachIllustration(illustratedBook.id, 0, illuFile, "warm watercolor dinosaur marshmallow volcano")
+        val targetClause = illustratedBook.clauses.first()
+        repo.annotateClauseSoftSuggestions(
+            illustratedBook.id,
+            targetClause.id,
+            listOf(SoftAnnotation(charIndex = 5, length = 1, suggestedWord = "地", correctedPinyin = "de", reason = "助词")),
+        )
+        repo.replaceRangeInClause(illustratedBook.id, targetClause.id, 0, 3, "大恐龙", actionLabel = "修改词语", toolName = "replace_span")
+        val snaps = repo.timeMachine.listSnapshots(illustratedBook.id)
+        repo.restoreSnapshot(illustratedBook.id, snaps.first().id)
+
         val controller = BookStudioController(env)
-        val books = controller.repo.listBooks()
-        val words = controller.repo.listCollectedWords()
-        val book = books.first()
-        val firstSent = book.sentences.first()
+        val books = repo.listBooks()
+        val mainBook = books.first { it.id == illustratedBook.id }
+        val plainLoaded = books.first { it.id == plainBook.id }
+        val words = repo.listCollectedWords()
+        val updatedSnaps = repo.timeMachine.listSnapshots(mainBook.id)
 
-        // 1. Hardcover Bookshelf
-        val shelfState = StudioUiState(
-            destination = StudioDestination.SHELF,
-            books = books,
-            collectedWords = words,
-        )
-        renderShot(File(outDir, "01-bookshelf.png"), 1140, 780) {
-            MaterialTheme { StoryStudioRoot(shelfState, controller) }
-        }
-
-        // 2. Two-Page Open Hardcover Spread (Tablet Landscape) with active sentence edit capsule
-        val spreadState = StudioUiState(
+        val cleanLandscapeState = StudioUiState(
             destination = StudioDestination.BOOK,
             books = books,
-            activeBookId = book.id,
+            activeBookId = mainBook.id,
             currentPageIndex = 0,
-            selectedSentenceId = book.sentences[1].id,
-            cursorAfterSentenceId = book.sentences.last().id,
             collectedWords = words,
+            timeMachineSnapshots = updatedSnaps,
         )
-        renderShot(File(outDir, "02-open-book-spread.png"), 1180, 820) {
-            MaterialTheme { StoryStudioRoot(spreadState, controller) }
+        renderShot(File(outDir, "01-landscape-spread.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(cleanLandscapeState, controller) }
         }
-
-        // 3. Single-Page Portrait / Phone View with Live Speaking Draft at Ink Cursor
-        val phoneLiveState = StudioUiState(
+        val phoneReaderState = StudioUiState(
             destination = StudioDestination.BOOK,
             books = books,
-            activeBookId = book.id,
+            activeBookId = mainBook.id,
             currentPageIndex = 0,
-            cursorAfterSentenceId = book.sentences[1].id,
+            cursorAfterClauseId = mainBook.clauses.getOrNull(1)?.id,
             activeMicIntent = MicIntent.WriteAtCursor,
             liveDraftText = "第二天太阳出来了",
             voiceEnergy = 0.55f,
             collectedWords = words,
+            timeMachineSnapshots = updatedSnaps,
         )
-        renderShot(File(outDir, "03-phone-live-writing.png"), 412, 900) {
-            MaterialTheme { StoryStudioRoot(phoneLiveState, controller) }
+        renderShot(File(outDir, "02-phone-reader.png"), 390, 844) {
+            MaterialTheme { StoryStudioRoot(phoneReaderState, controller) }
         }
-
-        // 4. TianZiGe Stroke & Spelling Card (`恐龙`)
-        val span = LiteracyEngine.findWordAt(firstSent.text, firstSent.text.indexOf('恐'))!!
-        val wordCardState = spreadState.copy(
-            selectedSentenceId = null,
+        val shelfState = StudioUiState(destination = StudioDestination.SHELF, books = books, collectedWords = words)
+        renderShot(File(outDir, "03-phone-bookshelf.png"), 390, 844) {
+            MaterialTheme { StoryStudioRoot(shelfState, controller) }
+        }
+        val portraitReaderState = StudioUiState(
+            destination = StudioDestination.BOOK,
+            books = books,
+            activeBookId = mainBook.id,
+            currentPageIndex = 0,
+            collectedWords = words,
+            timeMachineSnapshots = updatedSnaps,
+        )
+        renderShot(File(outDir, "04-tablet7-portrait-reader.png"), 560, 900) {
+            MaterialTheme { StoryStudioRoot(portraitReaderState, controller) }
+        }
+        val kongClause = mainBook.clauses.first { it.text.contains("小恐龙") }
+        val span = LiteracyEngine.findWordAt(kongClause.text, kongClause.text.indexOf('恐'), kongClause.contextualPhrases)!!
+        val wordCardState = cleanLandscapeState.copy(
+            selectedClauseId = null,
             inspectedWord = ActiveWordInspection(
-                sentenceId = firstSent.id,
+                clauseId = kongClause.id,
                 span = span,
                 homophones = LiteracyEngine.suggestHomophones(span.word, span.pinyins),
+                softSuggestion = "小孔龙",
             ),
         )
-        renderShot(File(outDir, "04-tianzige-word-card.png"), 1140, 780) {
+        renderShot(File(outDir, "05-tianzige-phrase-card.png"), 960, 600) {
             MaterialTheme { StoryStudioRoot(wordCardState, controller) }
         }
-
-        // 5. Word Box Flashcards
+        val capsuleState = cleanLandscapeState.copy(
+            selectedClauseId = mainBook.clauses.firstOrNull()?.id,
+        )
+        renderShot(File(outDir, "06-clause-capsule.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(capsuleState, controller) }
+        }
+        val unillustratedLandState = StudioUiState(
+            destination = StudioDestination.BOOK,
+            books = books,
+            activeBookId = plainLoaded.id,
+            currentPageIndex = 0,
+            collectedWords = words,
+        )
+        renderShot(File(outDir, "07-landscape-unillustrated.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(unillustratedLandState, controller) }
+        }
+        val tmState = cleanLandscapeState.copy(
+            isTimeMachineOpen = true,
+            timeMachineSnapshots = updatedSnaps,
+        )
+        renderShot(File(outDir, "08-time-machine-sheet.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(tmState, controller) }
+        }
+        val settingsState = shelfState.copy(
+            isParentSettingsOpen = true,
+            discoveredAiModels = listOf("auto/deepseek-v4.1-flash", "codex/gpt-image-2"),
+        )
+        renderShot(File(outDir, "09-parent-settings-sheet.png"), 560, 900) {
+            MaterialTheme { StoryStudioRoot(settingsState, controller) }
+        }
         val wordBoxState = StudioUiState(
             destination = StudioDestination.WORD_BOX,
             books = books,
             collectedWords = words,
         )
-        renderShot(File(outDir, "05-word-box.png"), 1024, 720) {
+        renderShot(File(outDir, "10-word-box.png"), 960, 600) {
             MaterialTheme { StoryStudioRoot(wordBoxState, controller) }
         }
 
@@ -243,7 +280,6 @@ private fun renderShot(
     val scene = ImageComposeScene((wDp * scale).toInt(), (hDp * scale).toInt(), Density(scale))
     try {
         scene.setContent(content)
-        // Step through 16 virtual frames (0s -> 2.4s) so LaunchedEffect + Animatable renders mid-calligraphy strokes!
         var img = scene.render(0L)
         for (step in 1..15) {
             img = scene.render(step * 160_000_000L)

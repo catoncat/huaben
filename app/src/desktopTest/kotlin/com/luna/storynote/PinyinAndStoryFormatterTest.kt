@@ -1,11 +1,14 @@
 package com.luna.storynote
 
+import com.luna.storynote.literacy.HanziStrokeRepository
+import com.luna.storynote.literacy.LiteracyEngine
+import com.luna.storynote.literacy.PinyinAnnotator
+import com.luna.storynote.storage.StoryBookRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 import kotlin.io.path.createTempDirectory
 
 class PinyinAndStoryFormatterTest {
@@ -36,8 +39,8 @@ class PinyinAndStoryFormatterTest {
         val kongIdx = sent.indexOf('恐')
         val span = LiteracyEngine.findWordAt(sent, kongIdx)
         assertNotNull(span)
-        assertEquals("恐龙", span!!.word)
-        assertEquals(listOf("kǒng", "lóng"), span.pinyins)
+        assertEquals("小恐龙", span!!.word)
+        assertEquals(listOf("xiǎo", "kǒng", "lóng"), span.pinyins)
 
         val zuoIdx = sent.indexOf('坐')
         val zuoSpan = LiteracyEngine.findWordAt(sent, zuoIdx)
@@ -93,9 +96,9 @@ class PinyinAndStoryFormatterTest {
                 }
             }
             val latest = repo.getBook(b0.id)!!
-            val targetId = latest.sentences[1].id
-            val updated = repo.replaceSentenceClip(b0.id, targetId, "小霸王龙飞上了太空！", null, 1.5)!!
-            assertEquals("小霸王龙飞上了太空！", updated.sentences[1].text)
+            val targetId = latest.clauses[1].id
+            val updated = repo.replaceClauseWithTake(b0.id, targetId, "小霸王龙飞上了太空！", "", null, 0L, 1500L, 1500L)!!
+            assertEquals("小霸王龙飞上了太空！", updated.clauses[1].text)
         } finally {
             tmp.deleteRecursively()
         }

@@ -1,4 +1,4 @@
-package com.luna.storynote
+package com.luna.storynote.audio
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -12,18 +12,27 @@ import java.io.File
 import java.util.ArrayDeque
 import java.util.UUID
 
+data class CommittedUtterance(
+    val takeId: String,
+    val takeFile: File,
+    val takeDurationMs: Long,
+    val text: String,
+    val uttStartMs: Long,
+    val uttEndMs: Long,
+)
+
 /**
- * Streams continuous 16kHz S16_LE PCM to Doubao Frontier, emitting live interim text at the cursor
- * and automatically slicing each finalized spoken utterance (`is_vad_finished`) into its own
- * leading-silence-trimmed WAV clip so every sentence on the book page owns its exact voice recording.
+ * Streams continuous 16kHz S16_LE PCM to Doubao Frontier, recording one continuous `AudioTake` WAV
+ * per recording session, syncing its header on each finalized VAD commit, and emitting `[uttStartMs, uttEndMs]`
+ * spans inside the take.
  */
 class UtteranceStreamRecorder(
     private val authRepo: DoubaoAuthRepository,
     private val httpClient: OkHttpClient,
-    private val newTempWavFile: () -> File,
+    private val newTakeWavFile: (takeId: String) -> File,
     private val singleUtteranceMode: Boolean = false,
     private val onLiveDraft: (draftText: String, voiceLevel: Float) -> Unit,
-    private val onUtteranceCommitted: (text: String, wavFile: File, durationSec: Double) -> Unit,
+    private val onUtteranceCommitted: (CommittedUtterance) -> Unit,
     private val onAutoFinishedSingle: () -> Unit = {},
     private val onError: (String) -> Unit = {},
 ) {
@@ -31,14 +40,20 @@ class UtteranceStreamRecorder(
     private val lock = Object()
     private val frameQueue = ArrayDeque<ByteArray>()
     private val pcmStaging = ByteArrayOutputStream(4096)
-
-    // Rolling PCM buffer for the *current* unspoken/in-progress utterance
     private val currentUtterancePcm = ByteArrayOutputStream(64_000)
+
+    private val takeId: String = "take_${UUID.randomUUID().toString().replace("-", "").take(10)}"
+    private val takeFile: File by lazy { newTakeWavFile(takeId) }
+    private var takeWriter: WavFileStreamWriter? = null
 
     @Volatile
     private var stopping = false
+
     @Volatile
     private var cancelled = false
+
+    @Volatile
+    private var latestDraftSnapshot: String = ""
 
     private val worker = Thread({ runWorker() }, "utterance-stream-recorder").apply {
         isDaemon = true
@@ -66,9 +81,6 @@ class UtteranceStreamRecorder(
         onLiveDraft(latestDraftSnapshot, rms)
     }
 
-    @Volatile
-    private var latestDraftSnapshot: String = ""
-
     fun finishGracefully(timeoutMs: Long = 8000L) {
         synchronized(lock) {
             if (!stopping) {
@@ -95,6 +107,16 @@ class UtteranceStreamRecorder(
             lock.notifyAll()
         }
         worker.join(1500L)
+        closeTakeWriter()
+    }
+
+    private fun closeTakeWriter() {
+        val w = synchronized(lock) {
+            val prev = takeWriter
+            takeWriter = null
+            prev
+        }
+        w?.close()
     }
 
     private fun flushUtteranceClip(recognizedText: String) {
@@ -104,56 +126,32 @@ class UtteranceStreamRecorder(
             currentUtterancePcm.reset()
         }
         val cleanText = recognizedText.trim()
-        if (cleanText.isEmpty() || !cleanText.any { it.isLetterOrDigit() }) return
+        if (cleanText.isEmpty() || !TranscriptUtils.hasSpeechChars(cleanText)) return
 
-        val trimmedPcm = trimSilenceEdges(rawPcm)
-        val wavFile = newTempWavFile()
-        val writer = WavFileStreamWriter(wavFile)
+        val trimmedPcm = TranscriptUtils.trimSilenceEdges(rawPcm)
+        val writer = synchronized(lock) {
+            takeWriter ?: WavFileStreamWriter(takeFile).also { takeWriter = it }
+        }
+        if (writer.dataBytes > 0L) {
+            writer.appendSilenceMs(220)
+        }
+        val uttStartMs = writer.durationMs
         writer.appendPcm(trimmedPcm, trimmedPcm.size)
-        val dur = writer.close()
+        val uttEndMs = writer.durationMs
+        writer.syncHeader()
+
         latestDraftSnapshot = ""
         onLiveDraft("", 0f)
-        onUtteranceCommitted(cleanText, wavFile, dur)
-    }
-
-    /**
-     * Trims long thinking pauses at the start/end of an utterance down to a natural 140ms pre-roll
-     * and 180ms tail so tapping any sentence on the book page plays the child's voice immediately.
-     */
-    private fun trimSilenceEdges(pcm: ByteArray): ByteArray {
-        val frameBytes = FrontierProtocol.PCM_FRAME_BYTES // 20ms = 640 bytes
-        if (pcm.size <= frameBytes * 16) return pcm
-
-        var firstSpeechOffset = 0
-        var foundSpeech = false
-        var off = 0
-        while (off + frameBytes <= pcm.size) {
-            val slice = pcm.copyOfRange(off, off + frameBytes)
-            if (!isFrameSilent(slice, peakThreshold = 340)) {
-                firstSpeechOffset = off
-                foundSpeech = true
-                break
-            }
-            off += frameBytes
-        }
-        if (!foundSpeech) return pcm.copyOfRange(pcm.size - frameBytes * 12, pcm.size)
-
-        var lastSpeechEnd = pcm.size
-        var rev = pcm.size - frameBytes
-        while (rev >= firstSpeechOffset) {
-            val slice = pcm.copyOfRange(rev, rev + frameBytes)
-            if (!isFrameSilent(slice, peakThreshold = 300)) {
-                lastSpeechEnd = rev + frameBytes
-                break
-            }
-            rev -= frameBytes
-        }
-
-        val preRollBytes = frameBytes * 7  // 140ms natural breath pre-roll
-        val postRollBytes = frameBytes * 9 // 180ms natural tail
-        val start = (firstSpeechOffset - preRollBytes).coerceAtLeast(0)
-        val end = (lastSpeechEnd + postRollBytes).coerceAtMost(pcm.size)
-        return if (end > start) pcm.copyOfRange(start, end) else pcm
+        onUtteranceCommitted(
+            CommittedUtterance(
+                takeId = takeId,
+                takeFile = takeFile,
+                takeDurationMs = uttEndMs,
+                text = cleanText,
+                uttStartMs = uttStartMs,
+                uttEndMs = uttEndMs,
+            ),
+        )
     }
 
     private fun runWorker() {
@@ -177,7 +175,6 @@ class UtteranceStreamRecorder(
                     activeSocket?.close()
                     activeSocket = openLiveWsSession()
                     if (activeSocket == null) {
-                        // Offline fallback: still retain audio until network recovers or stop
                         synchronized(lock) { currentUtterancePcm.write(frame) }
                         Thread.sleep(350L)
                         continue
@@ -187,7 +184,6 @@ class UtteranceStreamRecorder(
                 }
 
                 synchronized(lock) {
-                    // Cap single buffered silent stretch to 6s if child hasn't spoken yet so memory stays tiny
                     if (latestDraftSnapshot.isEmpty() && currentUtterancePcm.size() > FrontierProtocol.SAMPLE_RATE * 2 * 6) {
                         val tail = currentUtterancePcm.toByteArray()
                         currentUtterancePcm.reset()
@@ -204,12 +200,11 @@ class UtteranceStreamRecorder(
                     continue
                 }
 
-                val silent = isFrameSilent(frame)
+                val silent = TranscriptUtils.isFrameSilent(frame)
                 val dur = frame.size.toDouble() / (FrontierProtocol.SAMPLE_RATE * 2.0)
                 sessionAudioSec += dur
                 silenceRunSec = if (silent) (silenceRunSec + dur) else 0.0
 
-                // Drain any newly finalized utterances discovered by Doubao VAD
                 while (true) {
                     val committedTxt = activeSocket.pollCommittedUtterance() ?: break
                     flushUtteranceClip(committedTxt)
@@ -222,7 +217,6 @@ class UtteranceStreamRecorder(
                     }
                 }
 
-                // Seamless rollover before Doubao's 200s limit
                 if ((sessionAudioSec >= 115.0 && silenceRunSec >= 0.45) || sessionAudioSec >= 162.0) {
                     val leftoverTxt = activeSocket.finishAndDrain(3500L)
                     if (leftoverTxt.isNotEmpty()) flushUtteranceClip(leftoverTxt)
@@ -245,6 +239,7 @@ class UtteranceStreamRecorder(
             if (!cancelled) onError(e.message ?: "语音识别中断")
         } finally {
             activeSocket?.close()
+            closeTakeWriter()
         }
     }
 
@@ -326,7 +321,7 @@ class UtteranceStreamRecorder(
                                 for (i in 0 until results.length()) {
                                     val item = results.optJSONObject(i) ?: continue
                                     val txt = item.optString("text", "").trim()
-                                    if (txt.isEmpty() || !txt.any { it.isLetterOrDigit() }) continue
+                                    if (txt.isEmpty() || !TranscriptUtils.hasSpeechChars(txt)) continue
                                     val idx = if (item.has("index") && !item.isNull("index")) item.optInt("index", 0) else 0
                                     if (idx in finalizedIndices) continue
 
