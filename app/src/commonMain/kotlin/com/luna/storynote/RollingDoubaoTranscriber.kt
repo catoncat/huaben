@@ -7,7 +7,6 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
-import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.RandomAccessFile
@@ -38,7 +37,7 @@ fun isFrameSilent(frame: ByteArray, peakThreshold: Int = 380): Boolean {
     var i = 0
     while (i + 1 < frame.size) {
         val lo = frame[i].toInt() and 0xFF
-        val hi = frame[i + 1].toInt() // signed high byte
+        val hi = frame[i + 1].toInt()
         val sample = (hi shl 8) or lo
         if (abs(sample) >= peakThreshold) return false
         i += 2
@@ -51,11 +50,11 @@ class SingleDoubaoSession(
     private val httpClient: OkHttpClient,
     private val onPartialUpdate: (() -> Unit)? = null,
 ) {
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
     private val lock = Object()
     private var ws: WebSocket? = null
     private var sessionId = UUID.randomUUID().toString().uppercase()
     private var appKey = ""
-
     private var ready = false
     private var done = false
     private var finishedOk = false
@@ -66,11 +65,8 @@ class SingleDoubaoSession(
     private var unindexedPartial = ""
     private var unindexedFinal = ""
 
-    val isDone: Boolean
-        get() = synchronized(lock) { done }
-
-    val error: String
-        get() = synchronized(lock) { if (finishedOk) "" else errorMsg }
+    val isDone: Boolean get() = synchronized(lock) { done }
+    val error: String get() = synchronized(lock) { if (finishedOk) "" else errorMsg }
 
     fun connect(timeoutMs: Long = 8000L) {
         var lastErr: Exception? = null
@@ -85,7 +81,6 @@ class SingleDoubaoSession(
                     finishedOk = false
                     errorMsg = ""
                 }
-
                 val req = Request.Builder()
                     .url(creds.wsUrl)
                     .header("User-Agent", DoubaoCredentials.ANDROID_USER_AGENT)
@@ -95,18 +90,16 @@ class SingleDoubaoSession(
                     .header("x-keepalive-timeout", "3600")
                     .build()
 
-                val socket = httpClient.newWebSocket(req, Listener())
-                ws = socket
-
+                ws = httpClient.newWebSocket(req, Listener())
                 val deadline = System.currentTimeMillis() + timeoutMs
                 synchronized(lock) {
                     while (!ready && !done && errorMsg.isEmpty()) {
                         val rem = deadline - System.currentTimeMillis()
-                        if (rem <= 0L) throw AsrException("豆包语音会话握手超时")
+                        if (rem <= 0L) throw AsrException("豆包语音握手超时")
                         lock.wait(rem)
                     }
                     if (errorMsg.isNotEmpty() || !ready) {
-                        throw AsrException(errorMsg.ifEmpty { "豆包语音会话连接关闭" })
+                        throw AsrException(errorMsg.ifEmpty { "豆包语音会话关闭" })
                     }
                 }
                 return
@@ -116,18 +109,14 @@ class SingleDoubaoSession(
                 if (attempt == 0) Thread.sleep(250)
             }
         }
-        throw AsrException("豆包语音连接失败：${lastErr?.message ?: "未知错误"}", lastErr)
+        throw AsrException("豆包语音连接失败：${lastErr?.message ?: ""}", lastErr)
     }
 
     private inner class Listener : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             val startTask = FrontierProtocol.buildPacket(appKey, "StartTask", "", null, sessionId)
             val startSess = FrontierProtocol.buildPacket(
-                appKey,
-                "StartSession",
-                FrontierProtocol.buildSessionConfig(),
-                null,
-                sessionId,
+                appKey, "StartSession", FrontierProtocol.buildSessionConfig(), null, sessionId,
             )
             webSocket.send(startTask.toByteString())
             webSocket.send(startSess.toByteString())
@@ -138,7 +127,7 @@ class SingleDoubaoSession(
             var notifyUi = false
             synchronized(lock) {
                 if (parsed.statusCode != 20_000_000L) {
-                    errorMsg = "豆包识别异常 (${parsed.statusCode})"
+                    errorMsg = "识别异常 (${parsed.statusCode})"
                     done = true
                     lock.notifyAll()
                     return
@@ -161,7 +150,6 @@ class SingleDoubaoSession(
                         val isInterim = if (item.has("is_interim")) item.optBoolean("is_interim", true) else true
                         val vadFin = item.optBoolean("is_vad_finished", false)
                         val isTerm = nonStream || (!isInterim && vadFin)
-
                         val idx = if (item.has("index") && !item.isNull("index")) item.optInt("index", -1) else -1
                         if (idx < 0) {
                             unindexedPartial = txt
@@ -182,9 +170,7 @@ class SingleDoubaoSession(
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             synchronized(lock) {
-                if (!finishedOk && errorMsg.isEmpty()) {
-                    errorMsg = "豆包连接关闭"
-                }
+                if (!finishedOk && errorMsg.isEmpty()) errorMsg = "连接已关闭"
                 done = true
                 lock.notifyAll()
             }
@@ -192,9 +178,7 @@ class SingleDoubaoSession(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             synchronized(lock) {
-                if (!finishedOk && errorMsg.isEmpty()) {
-                    errorMsg = t.message ?: "网络连接中断"
-                }
+                if (!finishedOk && errorMsg.isEmpty()) errorMsg = t.message ?: "网络连接中断"
                 done = true
                 lock.notifyAll()
             }
@@ -202,46 +186,27 @@ class SingleDoubaoSession(
     }
 
     fun sendAudioFrame(frame: ByteArray): Boolean {
-        val socket = synchronized(lock) {
-            if (done) return false
-            ws
-        } ?: return false
+        val socket = synchronized(lock) { if (done) return false else ws } ?: return false
         val meta = "{\"timestamp_ms\":${System.currentTimeMillis()}}"
-        val pkt = FrontierProtocol.buildPacket("", "TaskRequest", meta, frame, sessionId)
-        return socket.send(pkt.toByteString())
+        return socket.send(FrontierProtocol.buildPacket("", "TaskRequest", meta, frame, sessionId).toByteString())
     }
 
     fun composeText(preferFinal: Boolean): String = synchronized(lock) {
         var joined = ""
-        val keys = (segments.keys + finals.keys).toSortedSet()
-        for (k in keys) {
-            val seg = if (preferFinal) {
-                finals[k] ?: segments[k].orEmpty()
-            } else {
-                segments[k] ?: finals[k].orEmpty()
-            }
-            if (hasSpeechChars(seg)) {
-                joined = joinTranscriptText(joined, seg)
-            }
+        for (k in (segments.keys + finals.keys).toSortedSet()) {
+            val seg = if (preferFinal) (finals[k] ?: segments[k].orEmpty()) else (segments[k] ?: finals[k].orEmpty())
+            if (hasSpeechChars(seg)) joined = joinTranscriptText(joined, seg)
         }
-        val tail = if (preferFinal) {
-            unindexedFinal.ifEmpty { unindexedPartial }
-        } else {
-            unindexedPartial.ifEmpty { unindexedFinal }
-        }
-        if (hasSpeechChars(tail)) {
-            joined = joinTranscriptText(joined, tail)
-        }
+        val tail = if (preferFinal) unindexedFinal.ifEmpty { unindexedPartial } else unindexedPartial.ifEmpty { unindexedFinal }
+        if (hasSpeechChars(tail)) joined = joinTranscriptText(joined, tail)
         joined
     }
 
     fun finish(timeoutMs: Long = 4500L): String {
         val socket = ws
         if (socket != null) {
-            val shouldSend = synchronized(lock) { !done }
-            if (shouldSend) {
-                val fin = FrontierProtocol.buildPacket(appKey, "FinishSession", "", null, sessionId)
-                socket.send(fin.toByteString())
+            if (synchronized(lock) { !done }) {
+                socket.send(FrontierProtocol.buildPacket(appKey, "FinishSession", "", null, sessionId).toByteString())
             }
             val deadline = System.currentTimeMillis() + timeoutMs
             synchronized(lock) {
@@ -276,12 +241,14 @@ class RollingDoubaoTranscriber(
     private val framePaceMs: Long = 0L,
     private val onTranscriptChanged: ((String) -> Unit)? = null,
 ) {
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
     private val lock = Object()
     private val pcmStaging = ByteArrayOutputStream(4096)
     private val frameQueue = ArrayDeque<ByteArray>()
     private val committedParts = mutableListOf<String>()
     private var activeSession: SingleDoubaoSession? = null
 
+    private var pauseRequested = false
     private var finishing = false
     private var cancelled = false
     private var rollovers = 0
@@ -304,9 +271,22 @@ class RollingDoubaoTranscriber(
                 frameQueue.addLast(all.copyOfRange(offset, offset + FrontierProtocol.PCM_FRAME_BYTES))
                 offset += FrontierProtocol.PCM_FRAME_BYTES
             }
-            if (offset < all.size) {
-                pcmStaging.write(all, offset, all.size - offset)
+            if (offset < all.size) pcmStaging.write(all, offset, all.size - offset)
+            lock.notifyAll()
+        }
+    }
+
+    /** Commits the current session cleanly while child pauses to think, avoiding idle socket timeouts. */
+    fun notifyPaused() {
+        synchronized(lock) {
+            val leftover = pcmStaging.toByteArray()
+            pcmStaging.reset()
+            if (leftover.isNotEmpty()) {
+                val padded = ByteArray(FrontierProtocol.PCM_FRAME_BYTES)
+                System.arraycopy(leftover, 0, padded, 0, minOf(leftover.size, padded.size))
+                frameQueue.addLast(padded)
             }
+            pauseRequested = true
             lock.notifyAll()
         }
     }
@@ -384,14 +364,35 @@ class RollingDoubaoTranscriber(
 
         try {
             while (true) {
-                val frame: ByteArray = synchronized(lock) {
-                    while (frameQueue.isEmpty() && !finishing && !cancelled) {
+                var shouldCommitForPause = false
+                var frame: ByteArray? = null
+
+                synchronized(lock) {
+                    while (frameQueue.isEmpty() && !pauseRequested && !finishing && !cancelled) {
                         lock.wait(500L)
                     }
                     if (cancelled) return
-                    if (frameQueue.isEmpty() && finishing) break
-                    frameQueue.removeFirst()
+                    if (frameQueue.isNotEmpty()) {
+                        frame = frameQueue.removeFirst()
+                    } else if (pauseRequested) {
+                        pauseRequested = false
+                        shouldCommitForPause = true
+                    } else if (finishing) {
+                        return@synchronized
+                    }
                 }
+
+                if (shouldCommitForPause) {
+                    if (sess != null) {
+                        commitSession(sess, isRollover = true)
+                        sess = null
+                        sessAudioSec = 0.0
+                        silenceSec = 0.0
+                    }
+                    continue
+                }
+
+                val currentFrame = frame ?: break
 
                 if (sess == null) {
                     val candidate = SingleDoubaoSession(authRepo, httpClient) { emitUpdate() }
@@ -409,9 +410,8 @@ class RollingDoubaoTranscriber(
                         connectFailures++
                         synchronized(lock) {
                             lastError = e.message ?: "连接豆包失败"
-                            frameQueue.addFirst(frame)
+                            frameQueue.addFirst(currentFrame)
                             if (connectFailures >= 6) {
-                                // Keep memory bounded if offline for long; WAV on disk preserves 100% of audio
                                 while (frameQueue.size > 250) frameQueue.removeFirst()
                             }
                         }
@@ -420,20 +420,20 @@ class RollingDoubaoTranscriber(
                     }
                 }
 
-                val silent = isFrameSilent(frame)
-                val ok = sess.sendAudioFrame(frame)
+                val silent = isFrameSilent(currentFrame)
+                val ok = sess.sendAudioFrame(currentFrame)
                 if (!ok || sess.isDone) {
                     val err = sess.error
                     commitSession(sess, isRollover = true)
                     sess = null
                     synchronized(lock) {
                         if (err.isNotEmpty()) lastError = err
-                        frameQueue.addFirst(frame)
+                        frameQueue.addFirst(currentFrame)
                     }
                     continue
                 }
 
-                val dur = frame.size.toDouble() / (FrontierProtocol.SAMPLE_RATE * 2.0)
+                val dur = currentFrame.size.toDouble() / (FrontierProtocol.SAMPLE_RATE * 2.0)
                 sessAudioSec += dur
                 silenceSec = if (silent) (silenceSec + dur) else 0.0
 
@@ -446,9 +446,7 @@ class RollingDoubaoTranscriber(
                     silenceSec = 0.0
                 }
 
-                if (framePaceMs > 0L) {
-                    Thread.sleep(framePaceMs)
-                }
+                if (framePaceMs > 0L) Thread.sleep(framePaceMs)
             }
 
             if (sess != null) {
@@ -457,9 +455,7 @@ class RollingDoubaoTranscriber(
             }
         } finally {
             sess?.close()
-            synchronized(lock) {
-                activeSession = null
-            }
+            synchronized(lock) { activeSession = null }
         }
     }
 
@@ -470,11 +466,8 @@ class RollingDoubaoTranscriber(
             wavFile: File,
             authRepo: DoubaoAuthRepository,
             httpClient: OkHttpClient,
-            onProgress: ((String) -> Unit)? = null,
         ): Pair<String, Int> {
-            if (!wavFile.isFile || wavFile.length() <= 44L) {
-                throw AsrException("录音文件为空或不存在")
-            }
+            if (!wavFile.isFile || wavFile.length() <= 44L) throw AsrException("录音文件为空")
             val pcmBytes = RandomAccessFile(wavFile, "r").use { raf ->
                 val hdr = ByteArray(44)
                 raf.readFully(hdr)
@@ -485,29 +478,24 @@ class RollingDoubaoTranscriber(
                 if (channels != 1 || sampleRate != FrontierProtocol.SAMPLE_RATE || bits != 16) {
                     throw AsrException("不支持的音频规格：${sampleRate}Hz/${channels}ch/${bits}bit")
                 }
-                val rem = (raf.length() - 44L).toInt()
-                val raw = ByteArray(rem)
+                val raw = ByteArray((raf.length() - 44L).toInt())
                 raf.seek(44L)
                 raf.readFully(raw)
                 raw
             }
-
             val engine = RollingDoubaoTranscriber(
                 authRepo = authRepo,
                 httpClient = httpClient,
                 softRolloverSec = 110.0,
                 hardRolloverSec = 155.0,
                 minSilenceForRollSec = 0.4,
-                framePaceMs = 2L, // ~10x realtime speed for fast re-transcription
-                onTranscriptChanged = onProgress,
+                framePaceMs = 2L,
             )
             engine.feedPcm(pcmBytes)
             val audioSec = pcmBytes.size.toDouble() / (FrontierProtocol.SAMPLE_RATE * 2.0)
             val maxWaitMs = maxOf(15_000L, (audioSec * 350.0).toLong() + 15_000L)
             val (text, rolls, err) = engine.finish(timeoutMs = maxWaitMs)
-            if (text.isEmpty() && err.isNotEmpty()) {
-                throw AsrException(err)
-            }
+            if (text.isEmpty() && err.isNotEmpty()) throw AsrException(err)
             return Pair(text, rolls)
         }
     }

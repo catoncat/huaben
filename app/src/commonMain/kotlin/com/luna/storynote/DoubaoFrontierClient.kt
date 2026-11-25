@@ -53,7 +53,7 @@ object FrontierProtocol {
         var v = value
         val out = ByteArrayOutputStream(10)
         while ((v and -0x80L) != 0L) {
-            out.write(((v.toInt() and 0x7F) or 0x80))
+            out.write((v.toInt() and 0x7F) or 0x80)
             v = v ushr 7
         }
         out.write(v.toInt() and 0x7F)
@@ -111,9 +111,7 @@ object FrontierProtocol {
             val b = data[offset].toInt() and 0xFF
             offset++
             result = result or ((b.toLong() and 0x7FL) shl shift)
-            if ((b and 0x80) == 0) {
-                return Pair(result, offset)
-            }
+            if ((b and 0x80) == 0) return Pair(result, offset)
             shift += 7
             if (shift >= 64) return null
         }
@@ -131,9 +129,7 @@ object FrontierProtocol {
             val tag = tagPair.first.toInt()
             offset = tagPair.second
             val fieldNum = tag ushr 3
-            val wireType = tag and 0x7
-
-            when (wireType) {
+            when (tag and 0x7) {
                 0 -> {
                     val vPair = readVarint(data, offset) ?: return null
                     offset = vPair.second
@@ -146,13 +142,10 @@ object FrontierProtocol {
                     if (chunkLen < 0 || offset + chunkLen > data.size) return null
                     when (fieldNum) {
                         4 -> event = String(data, offset, chunkLen, Charsets.UTF_8)
-                        7 -> {
-                            val str = String(data, offset, chunkLen, Charsets.UTF_8)
-                            payloadObj = try {
-                                JSONObject(str)
-                            } catch (_: Exception) {
-                                null
-                            }
+                        7 -> payloadObj = try {
+                            JSONObject(String(data, offset, chunkLen, Charsets.UTF_8))
+                        } catch (_: Exception) {
+                            null
                         }
                     }
                     offset += chunkLen
@@ -189,18 +182,13 @@ class DoubaoAuthRepository(
         var did = cached?.deviceId.orEmpty()
         var cdid = cached?.cdid.orEmpty()
         if (forceRefresh || !isValidDeviceId(did) || cdid.isBlank()) {
-            val registered = registerVirtualDevice(now)
-            did = registered.first
-            cdid = registered.second
+            val reg = registerVirtualDevice(now)
+            did = reg.first
+            cdid = reg.second
         }
 
         val appKey = fetchAppKey(did, cdid, System.currentTimeMillis())
-        val fresh = DoubaoCredentials(
-            deviceId = did,
-            cdid = cdid,
-            appKey = appKey,
-            updatedAtMs = System.currentTimeMillis(),
-        )
+        val fresh = DoubaoCredentials(did, cdid, appKey, System.currentTimeMillis())
         writeCached(fresh)
         return fresh
     }
@@ -246,35 +234,23 @@ class DoubaoAuthRepository(
         val cdid = UUID.randomUUID().toString()
         val openudid = UUID.randomUUID().toString().replace("-", "").take(16)
         val clientudid = UUID.randomUUID().toString()
-
         val query = buildQueryString(
             listOf(
-                "device_platform" to "android",
-                "os" to "android",
-                "ssmix" to "a",
-                "_rticket" to nowMs.toString(),
-                "cdid" to cdid,
-                "channel" to DoubaoCredentials.ANDROID_CHANNEL,
-                "aid" to DoubaoCredentials.ANDROID_AID,
+                "device_platform" to "android", "os" to "android", "ssmix" to "a",
+                "_rticket" to nowMs.toString(), "cdid" to cdid,
+                "channel" to DoubaoCredentials.ANDROID_CHANNEL, "aid" to DoubaoCredentials.ANDROID_AID,
                 "app_name" to DoubaoCredentials.ANDROID_APP_NAME,
                 "version_code" to DoubaoCredentials.ANDROID_VERSION_CODE,
                 "version_name" to DoubaoCredentials.ANDROID_VERSION_NAME,
                 "manifest_version_code" to DoubaoCredentials.ANDROID_VERSION_CODE,
                 "update_version_code" to DoubaoCredentials.ANDROID_VERSION_CODE,
-                "resolution" to "1080*2400",
-                "dpi" to "420",
-                "device_type" to "Pixel 7 Pro",
-                "device_brand" to "google",
-                "language" to "zh",
-                "os_api" to "34",
-                "os_version" to "16",
-                "ac" to "wifi",
+                "resolution" to "1080*2400", "dpi" to "420", "device_type" to "Pixel 7 Pro",
+                "device_brand" to "google", "language" to "zh", "os_api" to "34",
+                "os_version" to "16", "ac" to "wifi",
             ),
         )
-
         val header = JSONObject()
-            .put("device_id", 0)
-            .put("install_id", 0)
+            .put("device_id", 0).put("install_id", 0)
             .put("aid", DoubaoCredentials.ANDROID_AID.toInt())
             .put("app_name", DoubaoCredentials.ANDROID_APP_NAME)
             .put("version_code", DoubaoCredentials.ANDROID_VERSION_CODE.toInt())
@@ -283,35 +259,18 @@ class DoubaoAuthRepository(
             .put("update_version_code", DoubaoCredentials.ANDROID_VERSION_CODE.toInt())
             .put("channel", DoubaoCredentials.ANDROID_CHANNEL)
             .put("package", DoubaoCredentials.ANDROID_PACKAGE)
-            .put("device_platform", "android")
-            .put("os", "android")
-            .put("os_api", "34")
-            .put("os_version", "16")
-            .put("device_type", "Pixel 7 Pro")
-            .put("device_brand", "google")
-            .put("device_model", "Pixel 7 Pro")
-            .put("resolution", "1080*2400")
-            .put("dpi", "420")
-            .put("language", "zh")
-            .put("timezone", 8)
-            .put("access", "wifi")
-            .put("rom", "UP1A.231005.007")
-            .put("rom_version", "UP1A.231005.007")
-            .put("openudid", openudid)
-            .put("clientudid", clientudid)
-            .put("cdid", cdid)
-            .put("region", "CN")
-            .put("tz_name", "Asia/Shanghai")
-            .put("tz_offset", 28800)
-            .put("sim_region", "cn")
-            .put("carrier_region", "cn")
-            .put("cpu_abi", "arm64-v8a")
+            .put("device_platform", "android").put("os", "android")
+            .put("os_api", "34").put("os_version", "16")
+            .put("device_type", "Pixel 7 Pro").put("device_brand", "google")
+            .put("device_model", "Pixel 7 Pro").put("resolution", "1080*2400")
+            .put("dpi", "420").put("language", "zh").put("timezone", 8)
+            .put("access", "wifi").put("rom", "UP1A.231005.007").put("rom_version", "UP1A.231005.007")
+            .put("openudid", openudid).put("clientudid", clientudid).put("cdid", cdid)
+            .put("region", "CN").put("tz_name", "Asia/Shanghai").put("tz_offset", 28800)
+            .put("sim_region", "cn").put("carrier_region", "cn").put("cpu_abi", "arm64-v8a")
 
         val bodyJson = JSONObject()
-            .put("magic_tag", "ss_app_log")
-            .put("header", header)
-            .put("_gen_time", nowMs)
-            .toString()
+            .put("magic_tag", "ss_app_log").put("header", header).put("_gen_time", nowMs).toString()
 
         val req = Request.Builder()
             .url("${DoubaoCredentials.ANDROID_REGISTER_URL}?$query")
@@ -320,16 +279,12 @@ class DoubaoAuthRepository(
             .build()
 
         httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw AsrException("豆包设备注册失败 (HTTP ${resp.code})")
-            }
+            if (!resp.isSuccessful) throw AsrException("豆包设备注册失败 (HTTP ${resp.code})")
             val parsed = JSONObject(resp.body?.string().orEmpty())
             val did = parsed.optString("device_id_str", "").ifBlank {
                 parsed.opt("device_id")?.toString().orEmpty()
             }.trim()
-            if (!isValidDeviceId(did)) {
-                throw AsrException("豆包设备注册未返回有效 device_id")
-            }
+            if (!isValidDeviceId(did)) throw AsrException("豆包设备注册未返回有效 device_id")
             return Pair(did, cdid)
         }
     }
@@ -337,13 +292,9 @@ class DoubaoAuthRepository(
     private fun fetchAppKey(deviceId: String, cdid: String, nowMs: Long): String {
         val query = buildQueryString(
             listOf(
-                "device_platform" to "android",
-                "os" to "android",
-                "ssmix" to "a",
-                "_rticket" to nowMs.toString(),
-                "cdid" to cdid,
-                "channel" to DoubaoCredentials.ANDROID_CHANNEL,
-                "aid" to DoubaoCredentials.ANDROID_AID,
+                "device_platform" to "android", "os" to "android", "ssmix" to "a",
+                "_rticket" to nowMs.toString(), "cdid" to cdid,
+                "channel" to DoubaoCredentials.ANDROID_CHANNEL, "aid" to DoubaoCredentials.ANDROID_AID,
                 "app_name" to DoubaoCredentials.ANDROID_APP_NAME,
                 "version_code" to DoubaoCredentials.ANDROID_VERSION_CODE,
                 "version_name" to DoubaoCredentials.ANDROID_VERSION_NAME,
@@ -351,7 +302,7 @@ class DoubaoAuthRepository(
             ),
         )
         val bodyBytes = "body=null".toByteArray(Charsets.UTF_8)
-        val stub = md5Upper(bodyBytes)
+        val stub = MessageDigest.getInstance("MD5").digest(bodyBytes).joinToString("") { "%02X".format(it) }
 
         val req = Request.Builder()
             .url("${DoubaoCredentials.ANDROID_SETTINGS_URL}?$query")
@@ -361,20 +312,11 @@ class DoubaoAuthRepository(
             .build()
 
         httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw AsrException("豆包配置拉取失败 (HTTP ${resp.code})")
-            }
+            if (!resp.isSuccessful) throw AsrException("豆包配置获取失败 (HTTP ${resp.code})")
             val parsed = JSONObject(resp.body?.string().orEmpty())
-            val appKey = parsed
-                .optJSONObject("data")
-                ?.optJSONObject("settings")
-                ?.optJSONObject("asr_config")
-                ?.optString("app_key", "")
-                .orEmpty()
-                .trim()
-            if (appKey.isEmpty()) {
-                throw AsrException("豆包配置缺少 app_key")
-            }
+            val appKey = parsed.optJSONObject("data")?.optJSONObject("settings")
+                ?.optJSONObject("asr_config")?.optString("app_key", "").orEmpty().trim()
+            if (appKey.isEmpty()) throw AsrException("豆包配置缺少 app_key")
             return appKey
         }
     }
@@ -383,11 +325,6 @@ class DoubaoAuthRepository(
         params.joinToString("&") { (k, v) ->
             "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
         }
-
-    private fun md5Upper(bytes: ByteArray): String {
-        val digest = MessageDigest.getInstance("MD5").digest(bytes)
-        return digest.joinToString("") { "%02X".format(it) }
-    }
 
     companion object {
         fun defaultHttpClient(): OkHttpClient =

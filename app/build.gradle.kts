@@ -1,7 +1,61 @@
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
+    kotlin("multiplatform")
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+kotlin {
+    androidTarget {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
+
+    jvm("desktop") {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
+
+    sourceSets {
+        val commonMain by getting {
+            dependencies {
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.material3)
+                implementation(compose.ui)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+                implementation("com.squareup.okhttp3:okhttp:4.12.0")
+                implementation("com.github.houbb:pinyin:0.4.0")
+                compileOnly("org.json:json:20240303")
+            }
+        }
+        val androidMain by getting {
+            dependencies {
+                implementation("androidx.activity:activity-compose:1.9.3")
+                implementation("androidx.core:core-ktx:1.15.0")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+            }
+        }
+        val desktopMain by getting {
+            dependencies {
+                implementation(compose.desktop.currentOs)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
+                implementation("org.json:json:20240303")
+            }
+        }
+        val desktopTest by getting {
+            dependencies {
+                implementation(kotlin("test"))
+                implementation("junit:junit:4.13.2")
+                implementation("org.json:json:20240303")
+            }
+        }
+    }
 }
 
 android {
@@ -13,49 +67,30 @@ android {
         applicationId = "com.luna.storynote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Sign release builds with debug config initially so standalone APK installs directly
             signingConfig = signingConfigs.getByName("debug")
         }
-    }
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    testOptions {
-        unitTests.isReturnDefaultValues = true
-    }
 }
 
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+compose.desktop {
+    application {
+        mainClass = "com.luna.storynote.MainDesktopKt"
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg)
+            packageName = "StoryNote"
+            packageVersion = "1.0.0"
+        }
     }
-}
-
-dependencies {
-    testImplementation("junit:junit:4.13.2")
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material3.adaptive:adaptive")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

@@ -1,18 +1,27 @@
-# 小作家故事本 (`com.luna.storynote`)
+# 小作家故事集 (`com.luna.storynote`)
 
-独立运行的原生 Android 应用（Kotlin + Jetpack Compose，适配手机竖屏与安卓平板横屏双栏），专为 7 岁不识字小朋友免按住讲故事写书设计：
+面向准一年级（7 岁左右、正在学拼音认字但不会打字）小朋友的**注音故事书创作应用**（Compose Multiplatform：同一套代码同时运行于 **macOS 原生桌面窗口** 与 **Android 独立 APK**，无需安装 Android Studio 或模拟器）：
 
-- **点一下开始讲、再点一下保存**：解放双手，录制期间自动持有屏幕常亮与 `PARTIAL_WAKE_LOCK` 防锁屏断麦，含 `850ms` 防连点误触保护与 16 柱实时声波反馈。
-- **豆包输入法接口零密钥长语音识别（突破 ~200s 单次上限）**：
-  - 本地独立完成虚拟设备注册与 `Frontier` WebSocket 协议交互，无需电脑后台服务。
-  - `RollingDoubaoTranscriber` 在满 120s 遇到 0.45s 换气停顿（或满 165s 安全线）自动收尾切换新会话无缝拼接，同时支持对着已存 `audio.wav` 本地一键重新识别。
-- **原声 + Markdown 双留存与系统分享**：
-  - 每篇故事独立保存在应用外部文件目录 `notes/<时间戳-id>/`（含 16kHz 单声道无损 `audio.wav`、`note.md`、`meta.json`），支持贴纸标记、进度条回听、家长改字及系统一键分享。
+- **免按住讲故事 + 思考暂停续录**：点一下开讲，中途可点 **「⏸ 暂停想一想」/「▶ 继续讲」**，讲完点 **「✓ 讲完了，生成故事书」** 直接翻开排版好的注音书页；已有故事底部支持 **「🎙️ 接着往下讲这一篇」** 自动续接录音与段落。
+- **自动切分短段落（「一小段一小段」）**：[StoryBookFormatter.kt](app/src/commonMain/kotlin/com/luna/storynote/StoryBookFormatter.kt) 按叙事转折词与句群长度自动拆成适合一年级阅读的短段落，规整中文标点并断句。
+- **部编版一年级标准拼音注音与禁则排版**：
+  - [PinyinAnnotator.kt](app/src/commonMain/kotlin/com/luna/storynote/PinyinAnnotator.kt) 内置多音字词组消歧（如 `长大了 zhǎng dà le`、`睡觉 shuì jiào`、`快乐 kuài lè / 音乐 yīn yuè`、`看着 kàn zhe`、`饼干 bǐng gān`）、常用双音节轻声词表（`妈妈 mā ma`、`月亮 yuè liang`、`喜欢 xǐ huan`）及 **`一 / 不` 课本变调规则**（`一只 yì zhī`、`一块 yí kuài`、`不是 bú shì`）。
+  - [RubyTextComponents.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/RubyTextComponents.kt) 采用宋体字面 + 等宽字格逐字居中注音、首行缩进两格，并按中文避头尾禁则将标点绑定词簇，杜绝句读符号掉到行首。
+- **原声留存对照跟读**：每篇故事完整保留 16kHz `audio.wav` 原声与 `note.md` 文稿，孩子可边听自己讲的原声边对照拼音认字。
 
-## 本地编译 APK
+## 本地直接打开桌面版预览（零额外环境）
+
+```bash
+~/fun/story-note/run-local.sh
+```
+
+桌面窗口顶部内置 **「平板横屏铺满 / 平板竖屏 / 手机竖屏」** 一键切换，并可直接调用 Mac 麦克风试录与回放。
+
+## 编译安卓独立 APK
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 cd ~/fun/story-note
-./gradlew assembleRelease testDebugUnitTest
+./gradlew :app:desktopTest :app:assembleRelease
+# 产物：dist/StoryNote-v0.2.0.apk
 ```
