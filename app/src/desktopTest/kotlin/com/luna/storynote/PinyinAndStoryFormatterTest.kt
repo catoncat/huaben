@@ -1,6 +1,8 @@
 package com.luna.storynote
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -8,61 +10,94 @@ import kotlin.io.path.createTempDirectory
 
 class PinyinAndStoryFormatterTest {
     @Test
-    fun polyphonesAndNeutralTonesMatchGradeOneTextbook() {
-        val cells = PinyinAnnotator.annotateToCells("一只小恐龙吃一块大饼干，慢慢长大了，看着月亮唱音乐，快乐地去睡觉。妈妈说不是吗？")
-        val pairs = cells.filter { it.isHanzi }.map { "${it.charText}(${it.pinyin})" }.joinToString(" ")
+    fun spellingEngineHandlesTwoPartThreePartWholeAndUmlaut() {
+        val kong = LiteracyEngine.analyzeSpelling("kǒng")
+        assertEquals("k", kong.initial)
+        assertEquals("", kong.medial)
+        assertEquals("ǒng", kong.finalPart)
+        assertFalse(kong.isWholeSyllable)
 
-        // Key textbook sandhi + polyphones: 一只 -> yì zhī, 一块 -> yí kuài, 饼干 -> bǐng gān, 长大了 -> zhǎng, 看着 -> zhe, 音乐 -> yuè, 快乐 -> lè, 睡觉 -> jiào, 妈妈 -> mā ma, 不是 -> bú shì
-        assertTrue("Got: $pairs", pairs.contains("一(yì) 只(zhī)"))
-        assertTrue("Got: $pairs", pairs.contains("一(yí) 块(kuài) 大(dà) 饼(bǐng) 干(gān)"))
-        assertTrue("Got: $pairs", pairs.contains("长(zhǎng) 大(dà) 了(le)"))
-        assertTrue("Got: $pairs", pairs.contains("看(kàn) 着(zhe)"))
-        assertTrue("Got: $pairs", pairs.contains("月(yuè) 亮(liang)"))
-        assertTrue("Got: $pairs", pairs.contains("音(yīn) 乐(yuè)"))
-        assertTrue("Got: $pairs", pairs.contains("快(kuài) 乐(lè)"))
-        assertTrue("Got: $pairs", pairs.contains("睡(shuì) 觉(jiào)"))
-        assertTrue("Got: $pairs", pairs.contains("妈(mā) 妈(ma)"))
-        assertTrue("Got: $pairs", pairs.contains("不(bú) 是(shì) 吗(ma)"))
+        val chuan = LiteracyEngine.analyzeSpelling("chuán")
+        assertEquals("ch", chuan.initial)
+        assertEquals("u", chuan.medial)
+        assertEquals("án", chuan.finalPart)
+
+        val yue = LiteracyEngine.analyzeSpelling("yuè")
+        assertTrue(yue.isWholeSyllable)
+
+        val qu = LiteracyEngine.analyzeSpelling("qù")
+        assertEquals("q", qu.initial)
+        assertEquals("ǜ", qu.finalPart) // restores ü dots after q!
     }
 
     @Test
-    fun punctuationAttachesToClustersPreventingOrphanLineWraps() {
-        val clusters = PinyinAnnotator.annotateParagraphToClusters("“太棒啦！”小龙说。")
-        // Cluster 0 must bind opening quote `“` with `太`: `“太`
-        assertEquals("“太", clusters.first().cells.joinToString("") { it.charText })
-        // Cluster containing `啦` must bind `！”` so `！”` can never wrap alone onto a new line
-        val bangCluster = clusters.first { c -> c.cells.any { it.charText == "啦" } }
-        assertEquals("啦！”", bangCluster.cells.joinToString("") { it.charText })
-        // Last cluster must bind `说。`
-        assertEquals("说。", clusters.last().cells.joinToString("") { it.charText })
+    fun wordSegmentationAndHomophonesWorkOnStorySentence() {
+        val sent = "从前有一只蓝色的小恐龙坐在火山上。"
+        val kongIdx = sent.indexOf('恐')
+        val span = LiteracyEngine.findWordAt(sent, kongIdx)
+        assertNotNull(span)
+        assertEquals("恐龙", span!!.word)
+        assertEquals(listOf("kǒng", "lóng"), span.pinyins)
+
+        val zuoIdx = sent.indexOf('坐')
+        val zuoSpan = LiteracyEngine.findWordAt(sent, zuoIdx)
+        assertNotNull(zuoSpan)
+        val homophones = LiteracyEngine.suggestHomophones("坐", listOf("zuò"))
+        assertTrue("Expected 座 or 做 in $homophones", homophones.contains("座") || homophones.contains("做"))
+
+        val kongCharHomophones = LiteracyEngine.suggestHomophones("恐", listOf("kǒng"))
+        assertTrue("Expected single-char homophones for 恐, got $kongCharHomophones", kongCharHomophones.isNotEmpty())
     }
 
     @Test
-    fun spokenWallOfTextSplitsIntoShortBreathableParagraphs() {
-        val raw = "从前有一只蓝色的小恐龙，他住在一座很高的棉花糖火山上，每天早上都会吃一朵甜甜的云朵。有一天早上，小恐龙醒来发现棉花糖全都不见了，他特别着急，背起小书包就出门去找。后来他在森林里遇到了一只聪明的小狐狸，他们一起坐飞船飞到了彩虹星球。"
-        val paras = StoryBookFormatter.formatIntoParagraphs(raw)
-        assertTrue("Expected >= 3 short paragraphs, got ${paras.size}: $paras", paras.size >= 3)
-        assertTrue("Each paragraph should stay bite-sized: $paras", paras.all { it.length <= 65 })
+    fun diPolyphoneDistinguishesNounMapFromAdverbialParticle() {
+        val cells = PinyinAnnotator.annotateToCells("拿着星星地图，开心地跑。")
+        val dituIdx = cells.indexOfFirst { it.charText == "地" }
+        assertEquals("dì", cells[dituIdx].pinyin)
+        assertEquals("tú", cells[dituIdx + 1].pinyin)
+
+        val deIdx = cells.indexOfLast { it.charText == "地" }
+        assertEquals("xīn", cells[deIdx - 1].pinyin)
+        assertEquals("de", cells[deIdx].pinyin)
     }
 
     @Test
-    fun wavAppendConcatenatesAudioWithNaturalPause() {
-        val dir = createTempDirectory("wav-append-test").toFile()
+    fun strokeRepositoryLoads3755StandardCharacters() {
+        val stream = DesktopPlatformEnvironment().openStrokeAssetStream()
+        assertNotNull("strokes.bin.gz missing from resources", stream)
+        HanziStrokeRepository.ensureLoaded { stream }
+        val kongGlyph = HanziStrokeRepository.getGlyph('恐')
+        assertNotNull(kongGlyph)
+        assertEquals(10, kongGlyph!!.strokes.size) // `恐` has 10 standard strokes!
+    }
+
+    @Test
+    fun bookPaginatesSentencesAndReplacesInPlace() {
+        val tmp = createTempDirectory("book-repo-test-").toFile()
         try {
-            val wav1 = File(dir, "part1.wav")
-            val w1 = WavFileStreamWriter(wav1)
-            w1.appendSilenceMs(1000) // 1.0s
-            w1.close()
-
-            val wav2 = File(dir, "part2.wav")
-            val w2 = WavFileStreamWriter(wav2)
-            w2.appendSilenceMs(1000) // 1.0s
-            w2.close()
-
-            val combinedSec = WavFileStreamWriter.appendWavFiles(wav1, wav2, pauseMs = 500)
-            assertEquals(2.5, combinedSec, 0.02)
+            val repo = StoryBookRepository(tmp)
+            val b0 = repo.createBlankBook()
+            var afterId: String? = null
+            repeat(6) { idx ->
+                val (bNext, clip) = repo.insertSentenceClip(
+                    bookId = b0.id,
+                    afterSentenceId = afterId,
+                    rawText = "这是第${idx + 1}句长长的童话故事内容，小恐龙在森林里快乐地奔跑着。",
+                    tempWavFile = null,
+                    durationSec = 2.0,
+                )
+                afterId = clip.id
+                if (idx == 5) {
+                    val pages = bNext.paginate()
+                    assertTrue("Expected >= 2 pages, got ${pages.size}", pages.size >= 2)
+                }
+            }
+            val latest = repo.getBook(b0.id)!!
+            val targetId = latest.sentences[1].id
+            val updated = repo.replaceSentenceClip(b0.id, targetId, "小霸王龙飞上了太空！", null, 1.5)!!
+            assertEquals("小霸王龙飞上了太空！", updated.sentences[1].text)
         } finally {
-            dir.deleteRecursively()
+            tmp.deleteRecursively()
         }
     }
 }

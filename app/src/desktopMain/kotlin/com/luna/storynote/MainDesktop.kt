@@ -35,67 +35,61 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.luna.storynote.ui.StoryBookRootScreen
+import com.luna.storynote.ui.StoryStudioRoot
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 import kotlin.io.path.createTempDirectory
 
 fun main(args: Array<String>) {
-    val renderFlagIdx = args.indexOf("--render-preview")
-    if (renderFlagIdx >= 0 && renderFlagIdx + 1 < args.size) {
-        renderHeadlessPreviewShots(File(args[renderFlagIdx + 1]))
+    val idx = args.indexOf("--render-preview")
+    if (idx >= 0 && idx + 1 < args.size) {
+        renderVerificationSuite(File(args[idx + 1]))
         return
     }
 
     val env = DesktopPlatformEnvironment()
-    seedSampleStoryIfFirstRun(env)
-    val controller = StoryController(env)
+    seedShowcaseBookIfEmpty(env)
+    val controller = BookStudioController(env)
 
     application {
-        val windowState = rememberWindowState(size = DpSize(1120.dp, 820.dp))
+        val windowState = rememberWindowState(size = DpSize(1180.dp, 840.dp))
         Window(
             onCloseRequest = {
                 controller.dispose()
                 exitApplication()
             },
             state = windowState,
-            title = "小作家故事集（本地桌面版 — 与安卓 APK 同源）",
+            title = "小作家故事本",
         ) {
-            var previewMode by remember { mutableIntStateOf(0) } // 0=平板铺满, 1=平板竖屏, 2=手机竖屏
+            var formFactor by remember { mutableIntStateOf(0) } // 0=平板横屏双页, 1=平板竖屏单页, 2=手机
             val uiState by controller.uiState.collectAsState()
 
             MaterialTheme {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFFE7DFD1)),
+                        .background(Color(0xFFDAD1C2)),
                 ) {
-                    // Lightweight Desktop Device Form-Factor Switcher Bar
+                    // Subtle dark studio switcher bar (Desktop preview only — not present in APK)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF2B2520))
-                            .padding(horizontal = 16.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .background(Color(0xFF221E1A))
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = "本地实时预览（可直接点「讲新故事」用电脑麦克风试录）",
-                            color = Color(0xFFE5DDD3),
-                            fontSize = 12.5.sp,
-                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("平板横屏铺满", "平板竖屏 760×980", "手机 400×840").forEachIndexed { idx, label ->
-                                val selected = previewMode == idx
+                            listOf("平板对开 1140", "平板单页 760", "手机 400").forEachIndexed { i, label ->
                                 Surface(
                                     shape = CircleShape,
-                                    color = if (selected) Color(0xFFD95338) else Color(0xFF423932),
-                                    modifier = Modifier.clickable { previewMode = idx },
+                                    color = if (formFactor == i) Color(0xFFD44A2E) else Color(0xFF3A332C),
+                                    modifier = Modifier.clickable { formFactor = i },
                                 ) {
                                     Text(
                                         text = label,
                                         color = Color.White,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                     )
@@ -104,31 +98,23 @@ fun main(args: Array<String>) {
                         }
                     }
 
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val frameModifier = when (previewMode) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        val mod = when (formFactor) {
                             1 -> Modifier
-                                .padding(14.dp)
+                                .padding(12.dp)
                                 .width(760.dp)
                                 .height(980.dp)
-                                .shadow(10.dp, RoundedCornerShape(20.dp))
+                                .shadow(12.dp, RoundedCornerShape(20.dp))
                                 .clip(RoundedCornerShape(20.dp))
                             2 -> Modifier
-                                .padding(14.dp)
+                                .padding(12.dp)
                                 .width(400.dp)
-                                .height(840.dp)
-                                .shadow(10.dp, RoundedCornerShape(24.dp))
+                                .height(850.dp)
+                                .shadow(12.dp, RoundedCornerShape(24.dp))
                                 .clip(RoundedCornerShape(24.dp))
                             else -> Modifier.fillMaxSize()
                         }
-
-                        StoryBookRootScreen(
-                            uiState = uiState,
-                            controller = controller,
-                            modifier = frameModifier,
-                        )
+                        StoryStudioRoot(uiState = uiState, controller = controller, modifier = mod)
                     }
                 }
             }
@@ -136,95 +122,135 @@ fun main(args: Array<String>) {
     }
 }
 
-private fun seedSampleStoryIfFirstRun(env: DesktopPlatformEnvironment) {
-    val marker = File(env.storageRoot, ".seeded_demo_v2")
-    val repo = NoteRepository(env.storageRoot)
-    if (marker.isFile || repo.listNotes().isNotEmpty()) return
-    val recId = repo.newRecordingId()
-    val wav = WavFileStreamWriter(repo.stagingWavFile(recId))
-    wav.appendSilenceMs(3200)
-    wav.close()
-    repo.finalizeNewNote(
-        recId = recId,
-        durationSec = 3.2,
-        rawRecognizedText = "从前有一只蓝色的小恐龙，他慢慢长大了，最喜欢吃草莓味的棉花糖。有一天早上，他看着天上的月亮，觉得月亮像一块大饼干。突然，一艘飞船落在了家门口，小恐龙开心地跑过去交新朋友，玩累了才回家睡觉。",
-        rollovers = 0,
-        asrError = "",
+private fun seedShowcaseBookIfEmpty(env: DesktopPlatformEnvironment) {
+    val repo = StoryBookRepository(env.storageRoot)
+    if (repo.listBooks().isNotEmpty()) return
+
+    val b = repo.createBlankBook()
+    val demoSentences = listOf(
+        "从前有一只蓝色的小恐龙，他住在一座会喷棉花糖的火山上。",
+        "他慢慢长大了，每天早上最喜欢吃云朵味的冰淇淋。",
+        "有一天晚上，小恐龙看着天上的月亮，觉得月亮像一块圆圆的大饼干。",
+        "突然，一艘银色的飞船落在了家门口！",
+        "飞船里跳出一只聪明的小狐狸，拿着星星地图来找他一起去探险。",
+        "他们坐上飞船穿过彩虹，玩累了才回到温暖的山洞里睡觉。",
     )
-    marker.writeText("ok")
+    var afterId: String? = null
+    for (s in demoSentences) {
+        val wav = repo.newStagingWav()
+        val w = WavFileStreamWriter(wav)
+        w.appendSilenceMs(1800)
+        w.close()
+        val (_, clip) = repo.insertSentenceClip(b.id, afterId, s, wav, 1.8)
+        afterId = clip.id
+    }
+    repo.updateBookTitleAndCover(b.id, newTitle = "蓝色小恐龙与飞船", coverColorIndex = 0, emblemIndex = 1)
+    val fullBook = repo.getBook(b.id)!!
+    repo.toggleCollectWord("恐龙", listOf("kǒng", "lóng"), fullBook, fullBook.sentences[0])
+    repo.toggleCollectWord("飞船", listOf("fēi", "chuán"), fullBook, fullBook.sentences[3])
 }
 
-private fun renderHeadlessPreviewShots(outDir: File) {
+private fun renderVerificationSuite(outDir: File) {
     outDir.mkdirs()
-    val tempStorage = createTempDirectory("story-shot-").toFile()
+    val tmp = createTempDirectory("studio-v3-shots-").toFile()
     try {
-        val env = DesktopPlatformEnvironment(storageRoot = tempStorage)
-        seedSampleStoryIfFirstRun(env)
-        val notes = NoteRepository(tempStorage).listNotes()
-        val sample = notes.first()
-        val controller = StoryController(env)
+        val env = DesktopPlatformEnvironment(storageRoot = tmp)
+        HanziStrokeRepository.ensureLoaded { env.openStrokeAssetStream() }
+        seedShowcaseBookIfEmpty(env)
+        val controller = BookStudioController(env)
+        val books = controller.repo.listBooks()
+        val words = controller.repo.listCollectedWords()
+        val book = books.first()
+        val firstSent = book.sentences.first()
 
-        // 1. Render Bookshelf View (Tablet 1100x760 @ 2x Retina)
-        val shelfState = StoryAppUiState(notes = notes)
-        saveComposeShot(File(outDir, "01-shelf-tablet.png"), 1100, 760) {
-            MaterialTheme {
-                StoryBookRootScreen(uiState = shelfState, controller = controller)
-            }
-        }
-
-        // 2. Render Published Pinyin Book Reader View (Tablet 1100x880 & Phone 412x892)
-        val readerState = StoryAppUiState(notes = notes, selectedNoteId = sample.id)
-        saveComposeShot(File(outDir, "02-reader-tablet.png"), 1100, 880) {
-            MaterialTheme {
-                StoryBookRootScreen(uiState = readerState, controller = controller)
-            }
-        }
-        saveComposeShot(File(outDir, "03-reader-phone.png"), 412, 915) {
-            MaterialTheme {
-                StoryBookRootScreen(uiState = readerState, controller = controller)
-            }
-        }
-
-        // 3. Render Hands-Free Recording Modal View
-        val recState = StoryAppUiState(
-            notes = notes,
-            recorderOpen = true,
-            recStatus = RecStatus.RECORDING,
-            recElapsedSec = 28.0,
-            voiceLevel = 0.42f,
-            liveTranscript = "从前有一只住在森林里的小狐狸，他有一条毛茸茸的大尾巴……",
+        // 1. Hardcover Bookshelf
+        val shelfState = StudioUiState(
+            destination = StudioDestination.SHELF,
+            books = books,
+            collectedWords = words,
         )
-        saveComposeShot(File(outDir, "04-recorder-modal.png"), 1100, 760) {
-            MaterialTheme {
-                StoryBookRootScreen(uiState = recState, controller = controller)
-            }
+        renderShot(File(outDir, "01-bookshelf.png"), 1140, 780) {
+            MaterialTheme { StoryStudioRoot(shelfState, controller) }
         }
+
+        // 2. Two-Page Open Hardcover Spread (Tablet Landscape) with active sentence edit capsule
+        val spreadState = StudioUiState(
+            destination = StudioDestination.BOOK,
+            books = books,
+            activeBookId = book.id,
+            currentPageIndex = 0,
+            selectedSentenceId = book.sentences[1].id,
+            cursorAfterSentenceId = book.sentences.last().id,
+            collectedWords = words,
+        )
+        renderShot(File(outDir, "02-open-book-spread.png"), 1180, 820) {
+            MaterialTheme { StoryStudioRoot(spreadState, controller) }
+        }
+
+        // 3. Single-Page Portrait / Phone View with Live Speaking Draft at Ink Cursor
+        val phoneLiveState = StudioUiState(
+            destination = StudioDestination.BOOK,
+            books = books,
+            activeBookId = book.id,
+            currentPageIndex = 0,
+            cursorAfterSentenceId = book.sentences[1].id,
+            activeMicIntent = MicIntent.WriteAtCursor,
+            liveDraftText = "第二天太阳出来了",
+            voiceEnergy = 0.55f,
+            collectedWords = words,
+        )
+        renderShot(File(outDir, "03-phone-live-writing.png"), 412, 900) {
+            MaterialTheme { StoryStudioRoot(phoneLiveState, controller) }
+        }
+
+        // 4. TianZiGe Stroke & Spelling Card (`恐龙`)
+        val span = LiteracyEngine.findWordAt(firstSent.text, firstSent.text.indexOf('恐'))!!
+        val wordCardState = spreadState.copy(
+            selectedSentenceId = null,
+            inspectedWord = ActiveWordInspection(
+                sentenceId = firstSent.id,
+                span = span,
+                homophones = LiteracyEngine.suggestHomophones(span.word, span.pinyins),
+            ),
+        )
+        renderShot(File(outDir, "04-tianzige-word-card.png"), 1140, 780) {
+            MaterialTheme { StoryStudioRoot(wordCardState, controller) }
+        }
+
+        // 5. Word Box Flashcards
+        val wordBoxState = StudioUiState(
+            destination = StudioDestination.WORD_BOX,
+            books = books,
+            collectedWords = words,
+        )
+        renderShot(File(outDir, "05-word-box.png"), 1024, 720) {
+            MaterialTheme { StoryStudioRoot(wordBoxState, controller) }
+        }
+
         controller.dispose()
     } finally {
-        tempStorage.deleteRecursively()
+        tmp.deleteRecursively()
     }
 }
 
-private fun saveComposeShot(
+private fun renderShot(
     file: File,
-    widthDp: Int,
-    heightDp: Int,
+    wDp: Int,
+    hDp: Int,
     scale: Float = 2f,
     content: @androidx.compose.runtime.Composable () -> Unit,
 ) {
-    val pxW = (widthDp * scale).toInt()
-    val pxH = (heightDp * scale).toInt()
-    val scene = ImageComposeScene(
-        width = pxW,
-        height = pxH,
-        density = Density(scale),
-    )
+    val scene = ImageComposeScene((wDp * scale).toInt(), (hDp * scale).toInt(), Density(scale))
     try {
         scene.setContent(content)
-        val img = scene.render(0L)
-        val pngData = img.encodeToData(EncodedImageFormat.PNG)
-            ?: throw IllegalStateException("Failed to encode PNG")
-        file.writeBytes(pngData.bytes)
+        // Step through 16 virtual frames (0s -> 2.4s) so LaunchedEffect + Animatable renders mid-calligraphy strokes!
+        var img = scene.render(0L)
+        for (step in 1..15) {
+            img = scene.render(step * 160_000_000L)
+        }
+        val bytes = img.encodeToData(EncodedImageFormat.PNG)?.bytes
+            ?: throw IllegalStateException("PNG encode failed")
+        file.writeBytes(bytes)
     } finally {
         scene.close()
     }

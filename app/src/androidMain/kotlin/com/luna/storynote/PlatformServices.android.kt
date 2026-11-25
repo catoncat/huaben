@@ -9,11 +9,13 @@ import android.media.AudioRecord
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.PowerManager
+import android.speech.tts.TextToSpeech
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.font.FontFamily
-import androidx.core.content.FileProvider
 import java.io.File
+import java.io.InputStream
+import java.util.Locale
 
 @Composable
 actual fun rememberPlatformBookFontFamily(): FontFamily = FontFamily.Serif
@@ -24,13 +26,37 @@ class AndroidPlatformEnvironment(
 ) : PlatformEnvironment {
     override val storageRoot: File = appContext.getExternalFilesDir(null) ?: appContext.filesDir
     override val authCacheFile: File = File(appContext.filesDir, "doubao_auth.json")
-    override val shareActionLabel: String = "分享原声与故事稿"
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
 
-    override fun createMicCapture(): PlatformMicCapture = AndroidMicCapture()
+    init {
+        tts = TextToSpeech(appContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.CHINA
+                tts?.setSpeechRate(0.86f)
+                ttsReady = true
+            }
+        }
+    }
 
-    override fun createAudioPlayer(): PlatformAudioPlayer = AndroidMediaPlayerWrapper()
+    override fun createPcmMic(): PlatformPcmMic = AndroidPcmMic()
+
+    override fun createAudioPlayer(): PlatformAudioPlayer = AndroidClipPlayer()
+
+    override fun speakStandardWord(word: String) {
+        if (ttsReady && word.isNotBlank()) {
+            tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_tts")
+        }
+    }
+
+    override fun openStrokeAssetStream(): InputStream? =
+        try {
+            appContext.assets.open("strokes.bin.gz")
+        } catch (_: Exception) {
+            null
+        }
 
     override fun setKeepScreenAwake(keepAwake: Boolean) {
         val act = activityProvider()
@@ -45,7 +71,7 @@ class AndroidPlatformEnvironment(
             releaseWakeLock()
             try {
                 val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "StoryNote::RecWakeLock").apply {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "StoryNote::BookRecLock").apply {
                     acquire(45 * 60 * 1000L)
                 }
             } catch (_: Exception) {
@@ -63,116 +89,82 @@ class AndroidPlatformEnvironment(
         wakeLock = null
     }
 
-    override fun shareOrRevealNote(note: StoryNote) {
+    override fun exportBook(book: StoryBook) {
         val act = activityProvider() ?: return
         try {
-            val authority = "${appContext.packageName}.fileprovider"
-            val wavUri = FileProvider.getUriForFile(appContext, authority, note.audioFile)
-            val body = buildString {
-                appendLine("《${note.title}》")
-                appendLine()
-                appendLine(note.fullText)
-            }
+            val mdFile = File(book.bookDir, "story.md")
+            val text = if (mdFile.isFile) mdFile.readText(Charsets.UTF_8) else book.sentences.joinToString("\n") { it.text }
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "audio/wav"
-                putExtra(Intent.EXTRA_SUBJECT, "《${note.title}》")
-                putExtra(Intent.EXTRA_TEXT, body)
-                putExtra(Intent.EXTRA_STREAM, wavUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "《${book.title}》")
+                putExtra(Intent.EXTRA_TEXT, text)
             }
-            act.startActivity(Intent.createChooser(intent, "分享故事"))
+            act.startActivity(Intent.createChooser(intent, "导出故事书"))
         } catch (_: Exception) {
         }
     }
+
+    fun shutdown() {
+        releaseWakeLock()
+        tts?.shutdown()
+        tts = null
+    }
 }
 
-private class AndroidMicCapture : PlatformMicCapture {
+private class AndroidPcmMic : PlatformPcmMic {
     @Volatile
     private var running = false
-    @Volatile
-    private var paused = false
-    @Volatile
-    private var insertBreathOnResume = false
-
     private var thread: Thread? = null
-    private var writer: WavFileStreamWriter? = null
 
     @SuppressLint("MissingPermission")
-    override fun start(
-        outputWavFile: File,
-        onPcmChunk: (bytes: ByteArray, length: Int) -> Unit,
-        onProgress: (elapsedSec: Double, voiceLevel: Float) -> Unit,
-    ) {
+    override fun start(onPcmChunk: (bytes: ByteArray, length: Int) -> Unit) {
         val minBuf = AudioRecord.getMinBufferSize(
             FrontierProtocol.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        if (minBuf <= 0) throw IllegalStateException("设备不支持 16kHz 麦克风采集")
-        val audioRecord = AudioRecord(
+        if (minBuf <= 0) throw IllegalStateException("设备麦克风不支持 16kHz")
+        val record = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             FrontierProtocol.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             maxOf(minBuf * 2, 6400),
         )
-        if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-            audioRecord.release()
-            throw IllegalStateException("无法打开麦克风，请检查录音权限")
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            throw IllegalStateException("无法访问麦克风")
         }
-
-        val wav = WavFileStreamWriter(outputWavFile)
-        writer = wav
         running = true
-        paused = false
-        audioRecord.startRecording()
-
+        record.startRecording()
         thread = Thread(
             {
-                val buf = ByteArray(3200)
+                val buf = ByteArray(1600) // 50ms low-latency chunks
                 try {
                     while (running) {
-                        val n = audioRecord.read(buf, 0, buf.size)
-                        if (n > 0 && !paused) {
-                            if (insertBreathOnResume) {
-                                insertBreathOnResume = false
-                                wav.appendSilenceMs(350)
-                            }
-                            wav.appendPcm(buf, n)
-                            onPcmChunk(buf.copyOf(n), n)
-                            onProgress(wav.durationSec, WavFileStreamWriter.computeNormalizedRms(buf, n))
-                        }
+                        val n = record.read(buf, 0, buf.size)
+                        if (n > 0) onPcmChunk(buf.copyOf(n), n)
                     }
                 } finally {
-                    try { audioRecord.stop() } catch (_: Exception) {}
-                    audioRecord.release()
+                    try { record.stop() } catch (_: Exception) {}
+                    record.release()
                 }
             },
-            "android-story-mic",
+            "story-pcm-mic",
         ).apply {
             priority = Thread.MAX_PRIORITY
             start()
         }
     }
 
-    override fun setPaused(paused: Boolean) {
-        if (this.paused && !paused) {
-            insertBreathOnResume = true
-        }
-        this.paused = paused
-    }
-
-    override fun stop(): Double {
+    override fun stop() {
         running = false
-        thread?.join(2000L)
+        thread?.join(1500L)
         thread = null
-        val d = writer?.close() ?: 0.0
-        writer = null
-        return d
     }
 }
 
-private class AndroidMediaPlayerWrapper : PlatformAudioPlayer {
+private class AndroidClipPlayer : PlatformAudioPlayer {
     private var mp: MediaPlayer? = null
 
     override fun play(wavFile: File, onCompleted: () -> Unit) {
@@ -182,22 +174,6 @@ private class AndroidMediaPlayerWrapper : PlatformAudioPlayer {
             prepare()
             setOnCompletionListener { onCompleted() }
             start()
-        }
-    }
-
-    override fun pause() {
-        mp?.let { if (it.isPlaying) it.pause() }
-    }
-
-    override fun resume() {
-        mp?.let { if (!it.isPlaying) it.start() }
-    }
-
-    override fun seekToSec(sec: Float) {
-        val player = mp ?: return
-        try {
-            player.seekTo((sec * 1000f).toInt().coerceIn(0, player.duration))
-        } catch (_: Exception) {
         }
     }
 
@@ -211,10 +187,4 @@ private class AndroidMediaPlayerWrapper : PlatformAudioPlayer {
 
     override val isPlaying: Boolean
         get() = try { mp?.isPlaying == true } catch (_: Exception) { false }
-
-    override val currentPositionSec: Float
-        get() = try { (mp?.currentPosition ?: 0) / 1000f } catch (_: Exception) { 0f }
-
-    override val durationSec: Float
-        get() = try { (mp?.duration ?: 0) / 1000f } catch (_: Exception) { 0f }
 }

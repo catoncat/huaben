@@ -12,34 +12,30 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import com.luna.storynote.ui.StoryBookRootScreen
+import com.luna.storynote.ui.StoryStudioRoot
 
 class MainActivity : ComponentActivity() {
-    private var pendingPermCallback: (() -> Unit)? = null
-    private lateinit var controller: StoryController
+    private var pendingGrantedCallback: (() -> Unit)? = null
+    private lateinit var env: AndroidPlatformEnvironment
+    private lateinit var controller: BookStudioController
 
     private val requestMicLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        val cb = pendingPermCallback
-        pendingPermCallback = null
-        if (granted) {
-            cb?.invoke()
-        } else {
-            controller.showToast("请允许麦克风权限后再开始讲故事哦")
-        }
+        val cb = pendingGrantedCallback
+        pendingGrantedCallback = null
+        if (granted) cb?.invoke()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val env = AndroidPlatformEnvironment(
+        env = AndroidPlatformEnvironment(
             appContext = applicationContext,
             activityProvider = { this },
         )
-        controller = StoryController(
+        controller = BookStudioController(
             env = env,
-            externalEnsureMicPermission = { onGranted ->
+            ensureMicPermission = { onGranted ->
                 val ok = ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.RECORD_AUDIO,
@@ -47,7 +43,7 @@ class MainActivity : ComponentActivity() {
                 if (ok) {
                     onGranted()
                 } else {
-                    pendingPermCallback = onGranted
+                    pendingGrantedCallback = onGranted
                     requestMicLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
@@ -56,7 +52,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState by controller.uiState.collectAsState()
             MaterialTheme {
-                StoryBookRootScreen(
+                StoryStudioRoot(
                     uiState = uiState,
                     controller = controller,
                     modifier = Modifier.statusBarsPadding(),
@@ -68,6 +64,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (isFinishing) {
             controller.dispose()
+            env.shutdown()
         }
         super.onDestroy()
     }

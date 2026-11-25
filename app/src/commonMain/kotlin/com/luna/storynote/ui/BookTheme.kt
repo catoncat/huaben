@@ -1,44 +1,46 @@
 package com.luna.storynote.ui
 
 import androidx.compose.ui.graphics.Color
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-internal val ShelfBackground = Color(0xFFF6F0E4)
-internal val BookPageBackground = Color(0xFFFCF9F2)
-internal val BookCardSurface = Color(0xFFFFFDF9)
-internal val BookHairline = Color(0xFFE6DCCB)
-internal val BookBorder = Color(0xFFDFD3BE)
+// Studio & Paper Surfaces (Paper by FiftyThree / Apple Books inspired)
+internal val DeskSurface = Color(0xFFEAE3D4)
+internal val DeskTopBarGlass = Color(0xF2EAE3D4)
+internal val BookPaper = Color(0xFFFAF7F0)
+internal val BookPaperWarm = Color(0xFFF6F1E6)
+internal val BookPageEdge1 = Color(0xFFEDE6D8)
+internal val BookPageEdge2 = Color(0xFFE0D7C5)
+internal val BookRuleLine = Color(0xFFE3DAC9)
+internal val BookOutline = Color(0xFFD8CEBC)
 
-internal val BookInk = Color(0xFF231E1A)
-internal val BookSubInk = Color(0xFF5A4E43)
-internal val PinyinInk = Color(0xFF706154)
-internal val MutedInk = Color(0xFF8C7E70)
+// Typography Ink
+internal val InkPrimary = Color(0xFF1F1B17)
+internal val InkSecondary = Color(0xFF574C41)
+internal val InkPinyin = Color(0xFF756759)
+internal val InkSubtle = Color(0xFF968879)
+internal val InkDraftWet = Color(0xFF5C4E42)
 
-internal val Terracotta = Color(0xFFD95338)
-internal val TerracottaSoft = Color(0xFFFCEDE8)
-internal val ForestGreen = Color(0xFF287D57)
-internal val ForestGreenSoft = Color(0xFFEBF6F0)
-internal val AmberInk = Color(0xFFB86B14)
-internal val AmberSoft = Color(0xFFFEF4E2)
+// Accents & Highlights
+internal val Vermilion = Color(0xFFD44A2E)
+internal val VermilionSoft = Color(0xFFFAEDE8)
+internal val HighlightSun = Color(0xFFF9EED5)
+internal val HighlightWord = Color(0xFFF5E3C3)
+internal val JadeInk = Color(0xFF2B6E57)
+internal val JadeSoft = Color(0xFFE7F3EE)
+internal val TianZiRed = Color(0xFFD98B7E)
+internal val StrokeGhost = Color(0xFFE7DFD0)
 
-internal val BookSpinePalette = listOf(
-    Color(0xFFD95B43),
-    Color(0xFF45876D),
-    Color(0xFF4F77A3),
-    Color(0xFFC48733),
-    Color(0xFF82609E),
-    Color(0xFF3B838A),
+// Curated Museum Book-Cloth Covers & Gold Foil
+internal val BookClothColors = listOf(
+    Color(0xFFB84630), // Vermilion Cloth
+    Color(0xFF2D6353), // Pine Viridian Cloth
+    Color(0xFF345375), // Prussian Indigo Cloth
+    Color(0xFFA8742B), // Ochre Mustard Cloth
+    Color(0xFF61476B), // Aubergine Cloth
+    Color(0xFF455C41), // Moss Cloth
 )
 
-internal fun spineColorFor(index: Int): Color =
-    BookSpinePalette[(index.coerceAtLeast(0)) % BookSpinePalette.size]
+internal val FoilGold = Color(0xFFEAD4AA)
+internal val TitlePlatePaper = Color(0xFFFAF6EC)
 
-internal fun formatDurationClock(sec: Double): String {
-    val s = sec.toInt().coerceAtLeast(0)
-    return "%02d:%02d".format(Locale.US, s / 60, s % 60)
-}
-
-internal fun formatBookDate(ms: Long): String =
-    SimpleDateFormat("yyyy年M月d日", Locale.CHINA).format(Date(ms))
+internal fun bookClothFor(index: Int): Color =
+    BookClothColors[(index.coerceAtLeast(0)) % BookClothColors.size]

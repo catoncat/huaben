@@ -196,6 +196,33 @@ object PinyinAnnotator {
         "答应" to listOf("dā", "ying"),
         "数一数" to listOf("shǔ", "yi", "shǔ"),
         "一模一样" to listOf("yī", "mú", "yī", "yàng"),
+        "地图" to listOf("dì", "tú"),
+        "地球" to listOf("dì", "qiú"),
+        "地下" to listOf("dì", "xià"),
+        "地面" to listOf("dì", "miàn"),
+        "地板" to listOf("dì", "bǎn"),
+        "地铁" to listOf("dì", "tiě"),
+        "地洞" to listOf("dì", "dòng"),
+        "草地" to listOf("cǎo", "dì"),
+        "土地" to listOf("tǔ", "dì"),
+        "大地" to listOf("dà", "dì"),
+        "雪地" to listOf("xuě", "dì"),
+        "空地" to listOf("kòng", "dì"),
+    )
+
+    private val DI_NOUN_FOLLOWERS = setOf(
+        '图', '球', '方', '上', '下', '面', '板', '铁', '洞', '震', '雷', '址', '毯', '瓜', '皮', '壳', '盘', '带', '区', '位', '点',
+    )
+
+    private val REDUPLICATED_NOUN_CHARS = setOf(
+        '星', '妈', '爸', '哥', '姐', '弟', '妹', '爷', '奶', '宝', '娃', '叔', '姨', '舅', '姑',
+    )
+
+    private val ADVERBIAL_DI_PREFIXES = listOf(
+        "开心", "高兴", "快乐", "飞快", "大声", "小声", "好奇", "使劲", "用力", "仔细",
+        "认真", "勇敢", "伤心", "难过", "着急", "激动", "得意", "骄傲", "小心", "温柔",
+        "迅速", "拼命", "不停", "不断", "渐渐", "忽然", "突然", "自由", "安静", "兴奋",
+        "惊讶", "害羞", "委屈", "耐心", "专心",
     )
 
     private val SENTENCE_FINAL_PARTICLES = mapOf(
@@ -350,9 +377,15 @@ object PinyinAnnotator {
                     if (idx > 0) tokens[idx] = "zhe"
                 }
                 '地' -> {
-                    // Adverbial `Adj + 地 + V` (e.g., 开心地笑 / 慢慢地走) -> `de`
-                    if (idx >= 2 && idx + 1 < hanziRun.length && hanziRun[idx - 1] != '土' && hanziRun[idx - 1] != '大' && hanziRun[idx - 1] != '草' && hanziRun[idx - 1] != '空') {
-                        tokens[idx] = "de"
+                    // Adverbial `Adj + 地 + V` (e.g., 开心地笑 / 慢慢地走) -> `de`, preserving nouns like `地图 (dì tú)`
+                    if (idx >= 2 && idx + 1 < hanziRun.length && hanziRun[idx + 1] !in DI_NOUN_FOLLOWERS) {
+                        val isRedupAdj = hanziRun[idx - 1] == hanziRun[idx - 2] && hanziRun[idx - 1] !in REDUPLICATED_NOUN_CHARS
+                        val isKnownAdv = ADVERBIAL_DI_PREFIXES.any { pref ->
+                            idx >= pref.length && hanziRun.regionMatches(idx - pref.length, pref, 0, pref.length)
+                        }
+                        if (isRedupAdj || isKnownAdv) {
+                            tokens[idx] = "de"
+                        }
                     }
                 }
             }

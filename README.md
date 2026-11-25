@@ -1,13 +1,14 @@
-# 小作家故事集 (`com.luna.storynote`)
+# 小作家故事本 (`com.luna.storynote`)
 
-面向准一年级（7 岁左右、正在学拼音认字但不会打字）小朋友的**注音故事书创作应用**（Compose Multiplatform：同一套代码同时运行于 **macOS 原生桌面窗口** 与 **Android 独立 APK**，无需安装 Android Studio 或模拟器）：
+面向准一年级（7 岁左右、正在学拼音认字、不会打字）小朋友设计的**语音创作与注音互动故事书应用**（Compose Multiplatform：同一套代码同时运行于 **macOS 本地原生窗口** 与 **Android 独立 APK**，零额外环境安装）：
 
-- **免按住讲故事 + 思考暂停续录**：点一下开讲，中途可点 **「⏸ 暂停想一想」/「▶ 继续讲」**，讲完点 **「✓ 讲完了，生成故事书」** 直接翻开排版好的注音书页；已有故事底部支持 **「🎙️ 接着往下讲这一篇」** 自动续接录音与段落。
-- **自动切分短段落（「一小段一小段」）**：[StoryBookFormatter.kt](app/src/commonMain/kotlin/com/luna/storynote/StoryBookFormatter.kt) 按叙事转折词与句群长度自动拆成适合一年级阅读的短段落，规整中文标点并断句。
-- **部编版一年级标准拼音注音与禁则排版**：
-  - [PinyinAnnotator.kt](app/src/commonMain/kotlin/com/luna/storynote/PinyinAnnotator.kt) 内置多音字词组消歧（如 `长大了 zhǎng dà le`、`睡觉 shuì jiào`、`快乐 kuài lè / 音乐 yīn yuè`、`看着 kàn zhe`、`饼干 bǐng gān`）、常用双音节轻声词表（`妈妈 mā ma`、`月亮 yuè liang`、`喜欢 xǐ huan`）及 **`一 / 不` 课本变调规则**（`一只 yì zhī`、`一块 yí kuài`、`不是 bú shì`）。
-  - [RubyTextComponents.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/RubyTextComponents.kt) 采用宋体字面 + 等宽字格逐字居中注音、首行缩进两格，并按中文避头尾禁则将标点绑定词簇，杜绝句读符号掉到行首。
-- **原声留存对照跟读**：每篇故事完整保留 16kHz `audio.wav` 原声与 `note.md` 文稿，孩子可边听自己讲的原声边对照拼音认字。
+- **精装绘本书架与拟真对开书页**：[BookshelfAndWordBoxScreen.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/BookshelfAndWordBoxScreen.kt) 与 [InteractiveBookSpread.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/InteractiveBookSpread.kt) 采用亚麻装帧书脊、烫金线稿徽章、贴签注音封面与平板横屏双页对开（竖屏/手机自动切换单页纸叠），全界面零 Emoji、零说教提示文案。
+- **声文合一逐句创作（无需打字）**：[UtteranceStreamRecorder.kt](app/src/commonMain/kotlin/com/luna/storynote/UtteranceStreamRecorder.kt) 基于豆包流式语音与停顿断句，点击书页底部机械质感麦克风即可边讲边在呼吸墨迹光标处长出带拼音的文字，每句话自动绑定独立裁剪的 `16kHz WAV` 原声片段，页满自动翻开新页并盖下页码章。
+- **双层原位点按交互与修改**：
+  - **点任意汉字/词语** → 弹出 [TianZiGeWordSheet.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/TianZiGeWordSheet.kt) **田字格认字拼读卡**：内置离线 `3,755` 个国标一级汉字楷体逐笔动画（[HanziStrokeRepository.kt](app/src/commonMain/kotlin/com/luna/storynote/HanziStrokeRepository.kt)）、部编版一年级**声母/介母/韵母/整体认读音节**拆解（[LiteracyEngine.kt](app/src/commonMain/kotlin/com/luna/storynote/LiteracyEngine.kt)）、标准普通话点读、同音字一键纠错与重念换词、收入字词盒。
+  - **点句首声波圆点** → 播放孩子自己录下的该句原声，并浮出纯矢量三键胶囊（重讲本句 / 在此句后插讲 / 橡皮擦除及撤回）；点页面任意留白即可移动续写光标。
+- **部编版一年级标准注音与避头尾排版**：[PinyinAnnotator.kt](app/src/commonMain/kotlin/com/luna/storynote/PinyinAnnotator.kt) 支持常见多音字词组消歧（`地图 dì tú / 开心地 kāi xīn de`、`长大了 zhǎng dà le`、`睡觉 shuì jiào`）、轻声词表及 `一 / 不` 变调规则。
+- **3D 翻转字词盒（`我的字词盒`）**：[WordBoxFlashcardScreen.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/WordBoxFlashcardScreen.kt) 正面纯汉字无拼音自测，点击 180° 翻转揭示拼音并回放孩子故事里的原声例句。
 
 ## 本地直接打开桌面版预览（零额外环境）
 
@@ -15,13 +16,13 @@
 ~/fun/story-note/run-local.sh
 ```
 
-桌面窗口顶部内置 **「平板横屏铺满 / 平板竖屏 / 手机竖屏」** 一键切换，并可直接调用 Mac 麦克风试录与回放。
+桌面窗口顶部支持 **「平板对开 1140 / 平板单页 760 / 手机 400」** 实时切换预览，可直接用 Mac 麦克风试录与点读。
 
-## 编译安卓独立 APK
+## 编译测试与安卓独立 APK
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 cd ~/fun/story-note
 ./gradlew :app:desktopTest :app:assembleRelease
-# 产物：dist/StoryNote-v0.2.0.apk
+# 产物：dist/StoryNote-v0.3.0.apk
 ```
