@@ -2,6 +2,11 @@
 # Publish StoryNote Android APK + latest.json to the public domestic CNB release channel
 # (https://cnb.cool/lzb-prod/story-note-releases) without storing or logging any secrets.
 #
+# Uses a single-commit squashed `main` branch in the dedicated distribution repo so:
+# - Repo size stays bounded (~17MB) across unlimited releases
+# - Android clients in mainland China fetch both `latest.json` and the APK directly via
+#   unauthenticated `https://cnb.cool/.../-/git/raw/main/...` with zero tokens
+#
 # Usage:
 #   ./scripts/publish-cnb-release.sh v1.1.0 dist/StoryNote-v1.1.0.apk "更新说明"
 set -euo pipefail
@@ -11,10 +16,7 @@ if [ $# -lt 2 ]; then
   exit 1
 fi
 
-# Inject CNB credentials strictly via child-process env (never stdout / argv / disk)
-if [ -z "${CNB_API_TOKEN:-}" ]; then
-  exec jt resolve jt://secret/SccT56gc --env CNB_API_TOKEN --exec "$0" "$@"
-fi
+# Inject CNB git password strictly via child-process env (never stdout / argv / disk)
 if [ -z "${CNB_GIT_PASSWORD:-}" ]; then
   exec jt resolve jt://secret/4wMo2U4l --env CNB_GIT_PASSWORD --exec "$0" "$@"
 fi
@@ -37,7 +39,6 @@ APK_SHA256="$(shasum -a 256 "$APK_PATH" | awk '{print $1}')"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-echo "[1/4] Syncing $CNB_REPO git repo and pushing tag $TAG..."
 GIT_ASKPASS_SCRIPT="$TMP_DIR/askpass.sh"
 cat >"$GIT_ASKPASS_SCRIPT" <<'EOF'
 #!/usr/bin/env sh
@@ -49,28 +50,27 @@ EOF
 chmod 700 "$GIT_ASKPASS_SCRIPT"
 
 REPO_DIR="$TMP_DIR/repo"
-GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$GIT_ASKPASS_SCRIPT" \
-  git clone "https://cnb.cool/${CNB_REPO}.git" "$REPO_DIR" >/dev/null 2>&1 || {
-    mkdir -p "$REPO_DIR"
-    git -C "$REPO_DIR" init -b main >/dev/null
-    git -C "$REPO_DIR" remote add origin "https://cnb.cool/${CNB_REPO}.git"
-  }
-
+mkdir -p "$REPO_DIR/apk"
+git -C "$REPO_DIR" init -b main >/dev/null
+git -C "$REPO_DIR" remote add origin "https://cnb.cool/${CNB_REPO}.git"
 git -C "$REPO_DIR" config user.name "StoryNote Release Bot"
 git -C "$REPO_DIR" config user.email "release@storynote.local"
+git -C "$REPO_DIR" config http.postBuffer 524288000
 
-if ! git -C "$REPO_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
-  git -C "$REPO_DIR" checkout -B main >/dev/null 2>&1 || true
-fi
+cp "$APK_PATH" "$REPO_DIR/apk/${ASSET_NAME}"
 
-cat >"$REPO_DIR/README.md" <<'EOF'
+APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/${ASSET_NAME}"
+RELEASE_URL="https://cnb.cool/${CNB_REPO}"
+
+cat >"$REPO_DIR/README.md" <<EOF
 # StoryNote（小作家故事本）国内自动更新发布通道
 
-本仓库仅存放安卓端签名 Release APK 与 `latest.json` 更新清单，供客户端在国内网络下免登录直连检测更新与一键升级。
-EOF
+- 当前版本：**v${VERSION}**
+- 安装包直链：${APK_URL}
+- SHA-256：\`${APK_SHA256}\`
 
-APK_URL="https://cnb.cool/${CNB_REPO}/-/releases/download/${TAG}/${ASSET_NAME}"
-RELEASE_URL="https://cnb.cool/${CNB_REPO}/-/releases/tag/${TAG}"
+本仓库仅存放最新签名 Release APK 与 \`latest.json\` 更新清单，供客户端在国内网络下免登录直连检测更新与一键升级。
+EOF
 
 python3 - "$REPO_DIR/latest.json" "$VERSION" "$TAG" "$APK_URL" "$RELEASE_URL" "$NOTES" "$APK_SIZE" "$APK_SHA256" <<'PY'
 import json, sys, datetime
@@ -91,108 +91,25 @@ with open(out, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
-git -C "$REPO_DIR" add README.md latest.json
-if ! git -C "$REPO_DIR" diff --cached --quiet; then
-  git -C "$REPO_DIR" commit -m "release: publish StoryNote ${TAG}" >/dev/null
-fi
+echo "[1/2] Pushing ${ASSET_NAME} (${APK_SIZE} bytes) + latest.json to CNB (${CNB_REPO})..."
+git -C "$REPO_DIR" add README.md latest.json "apk/${ASSET_NAME}"
+git -C "$REPO_DIR" commit -m "release: StoryNote ${TAG}" >/dev/null
 git -C "$REPO_DIR" tag -f "$TAG"
 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$GIT_ASKPASS_SCRIPT" \
-  git -C "$REPO_DIR" push -u origin main >/dev/null
+  git -C "$REPO_DIR" push --force -u origin main
 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$GIT_ASKPASS_SCRIPT" \
-  git -C "$REPO_DIR" push -f origin "refs/tags/${TAG}" >/dev/null
+  git -C "$REPO_DIR" push --force origin "refs/tags/${TAG}"
 
-echo "[2/4] Creating/fetching CNB release ${TAG}..."
-REL_ID="$(python3 - "$CNB_REPO" "$TAG" "$NOTES" <<'PY'
-import json, os, sys, urllib.request, urllib.error
-repo, tag, notes = sys.argv[1:4]
-token = os.environ["CNB_API_TOKEN"]
-headers = {
-    "Authorization": f"Bearer {token}",
-    "Accept": "application/vnd.cnb.api+json",
-    "Content-Type": "application/json",
-}
-try:
-    req = urllib.request.Request(f"https://api.cnb.cool/{repo}/-/releases/tags/{tag}", headers=headers)
-    with urllib.request.urlopen(req, timeout=15) as r:
-        d = json.loads(r.read().decode())
-        print(d["id"])
-        sys.exit(0)
-except urllib.error.HTTPError as e:
-    if e.code != 404:
-        print(f"GET release failed: HTTP {e.code} {e.read().decode()}", file=sys.stderr)
-        sys.exit(1)
-
-payload = json.dumps({
-    "tag_name": tag,
-    "name": f"StoryNote {tag}",
-    "body": notes,
-    "draft": False,
-    "prerelease": False,
-    "make_latest": "true",
-}).encode("utf-8")
-req = urllib.request.Request(f"https://api.cnb.cool/{repo}/-/releases", data=payload, headers=headers, method="POST")
-with urllib.request.urlopen(req, timeout=20) as r:
-    d = json.loads(r.read().decode())
-    print(d["id"])
-PY
-)"
-echo "  Release ID: ${REL_ID}"
-
-echo "[3/4] Uploading ${ASSET_NAME} (${APK_SIZE} bytes) to CNB release..."
-python3 - "$CNB_REPO" "$REL_ID" "$ASSET_NAME" "$APK_SIZE" "$APK_PATH" <<'PY'
-import json, os, sys, urllib.request
-repo, rel_id, asset_name, size_s, apk_path = sys.argv[1:6]
-token = os.environ["CNB_API_TOKEN"]
-api_headers = {
-    "Authorization": f"Bearer {token}",
-    "Accept": "application/vnd.cnb.api+json",
-    "Content-Type": "application/json",
-}
-req_body = json.dumps({
-    "asset_name": asset_name,
-    "size": int(size_s),
-    "overwrite": True,
-}).encode("utf-8")
-req = urllib.request.Request(
-    f"https://api.cnb.cool/{repo}/-/releases/{rel_id}/asset-upload-url",
-    data=req_body,
-    headers=api_headers,
-    method="POST",
-)
-with urllib.request.urlopen(req, timeout=20) as r:
-    up = json.loads(r.read().decode())
-
-upload_url = up["upload_url"]
-verify_url = up["verify_url"]
-
-with open(apk_path, "rb") as f:
-    apk_bytes = f.read()
-
-put_req = urllib.request.Request(
-    upload_url,
-    data=apk_bytes,
-    headers={"Content-Type": "application/octet-stream", "Content-Length": str(len(apk_bytes))},
-    method="PUT",
-)
-with urllib.request.urlopen(put_req, timeout=180) as r:
-    if r.status not in (200, 201, 204):
-        raise RuntimeError(f"Asset PUT failed: HTTP {r.status}")
-
-ver_req = urllib.request.Request(
-    verify_url,
-    data=b"",
-    headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.cnb.api+json"},
-    method="POST",
-)
-with urllib.request.urlopen(ver_req, timeout=30) as r:
-    if r.status not in (200, 201, 204):
-        raise RuntimeError(f"Asset verify failed: HTTP {r.status}")
-print("  Upload & confirmation OK")
-PY
-
-echo "[4/4] Verifying unauthenticated domestic download..."
+echo "[2/2] Verifying unauthenticated domestic manifest + APK download..."
 MANIFEST_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/latest.json"
 curl -fsSL "$MANIFEST_URL"
 echo "---"
 curl -fsSLI "$APK_URL" | head -n 12
-echo "Published cleanly! Manifest: $MANIFEST_URL"
+VERIFY_APK="$TMP_DIR/verify.apk"
+curl -fsSL "$APK_URL" -o "$VERIFY_APK"
+GOT_SHA="$(shasum -a 256 "$VERIFY_APK" | awk '{print $1}')"
+if [ "$GOT_SHA" != "$APK_SHA256" ]; then
+  echo "SHA-256 mismatch! expected=$APK_SHA256 got=$GOT_SHA" >&2
+  exit 1
+fi
+echo "VERIFIED_OK sha256=${GOT_SHA} manifest=${MANIFEST_URL} apk=${APK_URL}"
