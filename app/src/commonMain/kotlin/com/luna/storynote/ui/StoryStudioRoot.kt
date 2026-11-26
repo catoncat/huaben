@@ -74,6 +74,10 @@ fun StoryStudioRoot(
                 onResetDefaults = { controller.resetAiConfigToDefaults() },
                 onClear = { controller.clearAiConfig() },
                 onDismiss = { controller.closeParentSettings() },
+                onCheckUpdate = { controller.checkForAppUpdate(silent = false) },
+                onDownloadAndInstall = { controller.downloadAndInstallUpdate(it) },
+                onInstallReadyApk = { controller.installReadyUpdateApk(it) },
+                onSaveUpdateConfig = { controller.saveUpdateConfig(it) },
             )
         }
 

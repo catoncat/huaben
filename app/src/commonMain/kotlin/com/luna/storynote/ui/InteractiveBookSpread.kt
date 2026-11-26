@@ -5,6 +5,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -83,7 +85,14 @@ fun InteractiveBookSpreadScreen(
     ) {
         val isLandscapeSpread = isLandscapeSpreadWidth(maxWidth, maxHeight)
         val isNarrowPhone = maxWidth < 560.dp
-        val topClearance = if (isNarrowPhone) 102.dp else 58.dp
+        val showDesktopPageChevrons = maxWidth >= 760.dp
+        // On mobile phones, open 100% pure immersive paper; tapping the page smoothly reveals the single-row bar!
+        var chromeVisible by remember(book.id, isNarrowPhone) { mutableStateOf(!isNarrowPhone) }
+        val topBarVisible = chromeVisible ||
+            uiState.isFullBookPlaying ||
+            uiState.illustratingPageIndex != null ||
+            uiState.isVoiceSparkSpeaking
+        val topClearance = if (isNarrowPhone) 14.dp else 56.dp
         val targetPage = uiState.currentPageIndex.coerceIn(0, pageCount - 1)
         val pagerState = rememberPagerState(
             initialPage = targetPage,
@@ -166,6 +175,7 @@ fun InteractiveBookSpreadScreen(
                         controller = controller,
                         bookFont = bookFont,
                         topClearance = topClearance,
+                        onTapPageBlank = { chromeVisible = !chromeVisible },
                         modifier = depthMod,
                     )
                 } else {
@@ -180,12 +190,13 @@ fun InteractiveBookSpreadScreen(
                         controller = controller,
                         bookFont = bookFont,
                         topClearance = topClearance,
+                        onTapPageBlank = { chromeVisible = !chromeVisible },
                         modifier = depthMod,
                     )
                 }
             }
 
-            if (!uiState.isRecording && pagerState.currentPage > 0) {
+            if (showDesktopPageChevrons && !uiState.isRecording && pagerState.currentPage > 0) {
                 EdgePageTurnControl(
                     isForward = false,
                     onClick = {
@@ -200,7 +211,7 @@ fun InteractiveBookSpreadScreen(
                 )
             }
 
-            if (!uiState.isRecording && pagerState.currentPage < pageCount - 1) {
+            if (showDesktopPageChevrons && !uiState.isRecording && pagerState.currentPage < pageCount - 1) {
                 EdgePageTurnControl(
                     isForward = true,
                     onClick = {
@@ -215,12 +226,15 @@ fun InteractiveBookSpreadScreen(
                 )
             }
 
-            Column(
+            // Single-row floating reader chrome: tap-to-reveal on phone, never wraps onto 2 rows!
+            AnimatedVisibility(
+                visible = topBarVisible,
+                enter = fadeIn() + slideInVertically { -it / 2 },
+                exit = fadeOut() + slideOutVertically { -it / 2 },
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = if (isLandscapeSpread) 24.dp else 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = if (isLandscapeSpread) 24.dp else 12.dp, vertical = 10.dp),
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     CircularChromeIconButton(
@@ -233,49 +247,30 @@ fun InteractiveBookSpreadScreen(
                         IconChevronBack(color = InkPrimary, size = 18.dp)
                     }
 
-                    Text(
-                        text = "${pagerState.currentPage + 1} / $pageCount",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = InkSubtle,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-
                     if (!isNarrowPhone) {
-                        ReaderActionPill(
-                            hasContent = book.clauses.isNotEmpty(),
-                            isFullBookPlaying = uiState.isFullBookPlaying,
-                            isAiConfigured = uiState.isAiConfigured,
-                            isIllustratingThisPage = uiState.illustratingPageIndex == pagerState.currentPage,
-                            isIllustratingAnyPage = uiState.illustratingPageIndex != null,
-                            isVoiceSparkSpeaking = uiState.isVoiceSparkSpeaking,
-                            onToggleReadAlong = { controller.toggleFullBookReadAlong() },
-                            onIllustratePage = { controller.illustrateCurrentPage() },
-                            onTriggerSpark = { controller.triggerVoiceSpark() },
-                            onOpenTimeMachine = { controller.openTimeMachine() },
-                            modifier = Modifier.align(Alignment.CenterEnd),
+                        Text(
+                            text = "${pagerState.currentPage + 1} / $pageCount",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = InkSubtle,
+                            modifier = Modifier.align(Alignment.Center),
                         )
                     }
-                }
 
-                if (isNarrowPhone) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ReaderActionPill(
-                            hasContent = book.clauses.isNotEmpty(),
-                            isFullBookPlaying = uiState.isFullBookPlaying,
-                            isAiConfigured = uiState.isAiConfigured,
-                            isIllustratingThisPage = uiState.illustratingPageIndex == pagerState.currentPage,
-                            isIllustratingAnyPage = uiState.illustratingPageIndex != null,
-                            isVoiceSparkSpeaking = uiState.isVoiceSparkSpeaking,
-                            onToggleReadAlong = { controller.toggleFullBookReadAlong() },
-                            onIllustratePage = { controller.illustrateCurrentPage() },
-                            onTriggerSpark = { controller.triggerVoiceSpark() },
-                            onOpenTimeMachine = { controller.openTimeMachine() },
-                        )
-                    }
+                    ReaderActionPill(
+                        hasContent = book.clauses.isNotEmpty(),
+                        isFullBookPlaying = uiState.isFullBookPlaying,
+                        isAiConfigured = uiState.isAiConfigured,
+                        isIllustratingThisPage = uiState.illustratingPageIndex == pagerState.currentPage,
+                        isIllustratingAnyPage = uiState.illustratingPageIndex != null,
+                        isVoiceSparkSpeaking = uiState.isVoiceSparkSpeaking,
+                        onToggleReadAlong = { controller.toggleFullBookReadAlong() },
+                        onIllustratePage = { controller.illustrateCurrentPage() },
+                        onTriggerSpark = { controller.triggerVoiceSpark() },
+                        onOpenTimeMachine = { controller.openTimeMachine() },
+                        compact = isNarrowPhone,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
                 }
             }
 

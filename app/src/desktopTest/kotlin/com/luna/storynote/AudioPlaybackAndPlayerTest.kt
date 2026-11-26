@@ -146,7 +146,11 @@ class AudioPlaybackAndPlayerTest {
             assertFalse(isFullBookPlaying)
             assertNull(targetPage)
 
+            // Corrupt audio during full-book read-along cleanly falls back to TTS instead of skipping/crashing
             coordinator.playBookFromClauseIndex(book.id, 0)
+            assertEquals(clauses.first().id, playingClauseId)
+            assertTrue(isFullBookPlaying)
+            coordinator.stop()
             assertNull(playingClauseId)
             assertFalse(isFullBookPlaying)
             assertNull(targetPage)
@@ -266,6 +270,9 @@ class AudioPlaybackAndPlayerTest {
             assertNull(playingClauseId); assertFalse(isFullBookPlaying); assertNull(targetPage)
 
             coordinator.playBookFromClauseIndex(book.id, 0)
+            assertEquals(clause.id, playingClauseId)
+            assertTrue(isFullBookPlaying)
+            coordinator.stop()
             assertNull(playingClauseId); assertFalse(isFullBookPlaying); assertNull(targetPage)
 
             coordinator.playCollectedWordExample(

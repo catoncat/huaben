@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <external-files-path name="story_exports" path="exports/" />
+    <external-files-path name="story_updates" path="updates/" />
+    <external-files-path name="story_books" path="books/" />
     <external-files-path name="story_notes" path="notes/" />
     <files-path name="internal_notes" path="notes/" />
+    <cache-path name="cache_updates" path="updates/" />
 </paths>

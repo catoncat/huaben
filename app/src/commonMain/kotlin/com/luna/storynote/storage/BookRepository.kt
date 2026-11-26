@@ -1,6 +1,5 @@
 package com.luna.storynote.storage
 
-import com.luna.storynote.audio.WavAudioFiles
 import com.luna.storynote.literacy.StoryBookFormatter
 import com.luna.storynote.model.AudioTake
 import com.luna.storynote.model.BookIllustration
@@ -113,13 +112,16 @@ class StoryBookRepository(private val rootStorageDir: File) {
     ): Pair<StoryBook, List<Clause>> = synchronized(lock) {
         val folder = resolveBookFolder(bookId) ?: throw IllegalStateException("找不到故事书")
         val book = readBookUnlocked(folder) ?: throw IllegalStateException("找不到故事书")
-        timeMachine.recordSnapshot(book, actionLabel, toolName)
-
-        val effTakeId = takeId.ifBlank { "take_${UUID.randomUUID().toString().replace("-", "").take(8)}" }
-        val updatedTakes = registerTakeUnlocked(folder, book.takes, effTakeId, takeWavFile, takeDurationMs)
-        val hasAudio = updatedTakes.any { it.id == effTakeId }
 
         val cleanText = StoryBookFormatter.normalizeChinesePunct(rawText)
+        if (cleanText.isBlank()) {
+            return@synchronized Pair(book, emptyList())
+        }
+
+        val effTakeId = takeId.ifBlank { "take_${UUID.randomUUID().toString().replace("-", "").take(8)}" }
+        val updatedTakes = BookJsonCodec.registerTakeFile(folder, book.takes, effTakeId, takeWavFile, takeDurationMs)
+        val hasAudio = updatedTakes.any { it.id == effTakeId }
+
         val insertedClauses = StoryBookFormatter.buildClausesForTake(
             rawText = cleanText,
             takeId = if (hasAudio) effTakeId else "",
@@ -128,6 +130,21 @@ class StoryBookRepository(private val rootStorageDir: File) {
             clauseIdGenerator = { "c_${UUID.randomUUID().toString().replace("-", "").take(8)}" },
             finalParagraphBreak = forceParagraphBreak,
         )
+        if (insertedClauses.isEmpty()) {
+            return@synchronized Pair(book, emptyList())
+        }
+
+        // Only snapshot before appending when the book already has content (no empty 0-clause noise!)
+        if (book.clauses.isNotEmpty()) {
+            val preview = cleanText.take(24) + if (cleanText.length > 24) "…" else ""
+            timeMachine.recordSnapshot(
+                book = book,
+                actionLabel = actionLabel,
+                toolName = toolName,
+                changeSummary = "新增前（随后写下「$preview」）",
+                focusClauseId = book.clauses.lastOrNull()?.id,
+            )
+        }
 
         val list = book.clauses.toMutableList()
         val insertPos = when (afterClauseId) {
@@ -164,7 +181,7 @@ class StoryBookRepository(private val rootStorageDir: File) {
         durationSec: Double,
         forceParagraphBreak: Boolean = false,
     ): Pair<StoryBook, Clause> {
-        val durMs = resolveWavDurMs(tempWavFile, durationSec)
+        val durMs = BookJsonCodec.resolveWavDurMs(tempWavFile, durationSec)
         val takeId = "take_${UUID.randomUUID().toString().replace("-", "").take(8)}"
         val (book, clauses) = insertUtteranceWithClauses(
             bookId = bookId,
@@ -195,13 +212,24 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val idx = book.clauses.indexOfFirst { it.id == clauseId }
         if (idx < 0) return book
 
-        timeMachine.recordSnapshot(book, "重录句子", "rerecord_clause_audio")
         val oldClause = book.clauses[idx]
+        val cleanText = StoryBookFormatter.normalizeChinesePunct(newRawText)
+        val hasIncomingWav = takeWavFile != null && takeWavFile.isFile && takeWavFile.length() > 44L
+        if (cleanText.isBlank() || (cleanText == oldClause.text && !hasIncomingWav)) {
+            return book
+        }
+
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "重说句子",
+            toolName = "rerecord_clause_audio",
+            changeSummary = "原句：「${oldClause.text}」",
+            focusClauseId = oldClause.id,
+        )
         val effTakeId = takeId.ifBlank { "take_${UUID.randomUUID().toString().replace("-", "").take(8)}" }
-        val updatedTakes = registerTakeUnlocked(folder, book.takes, effTakeId, takeWavFile, takeDurationMs)
+        val updatedTakes = BookJsonCodec.registerTakeFile(folder, book.takes, effTakeId, takeWavFile, takeDurationMs)
         val hasNewAudio = updatedTakes.any { it.id == effTakeId }
 
-        val cleanText = StoryBookFormatter.normalizeChinesePunct(newRawText)
         val newClauses = if (hasNewAudio) {
             StoryBookFormatter.buildClausesForTake(
                 rawText = cleanText,
@@ -239,7 +267,7 @@ class StoryBookRepository(private val rootStorageDir: File) {
         durationSec: Double,
     ): StoryBook? {
         val hasFile = tempWavFile != null && tempWavFile.isFile && tempWavFile.length() > 44L
-        val durMs = if (hasFile) resolveWavDurMs(tempWavFile, durationSec) else 0L
+        val durMs = if (hasFile) BookJsonCodec.resolveWavDurMs(tempWavFile, durationSec) else 0L
         val takeId = if (hasFile) "take_${UUID.randomUUID().toString().replace("-", "").take(8)}" else ""
         return replaceClauseWithTake(bookId, sentenceId, newRawText, takeId, tempWavFile, 0L, durMs, durMs)
     }
@@ -262,8 +290,17 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val cleanWord = replacementWord.trim().trim('。', '，', '！', '？', '.', ',', '!', '?')
         if (cleanWord.isEmpty()) return book
 
-        timeMachine.recordSnapshot(book, actionLabel, toolName)
+        val replacedSlice = old.text.substring(startIdx, endIdx)
         val newText = old.text.substring(0, startIdx) + cleanWord + old.text.substring(endIdx)
+        if (newText == old.text) return book
+
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = actionLabel,
+            toolName = toolName,
+            changeSummary = "「$replacedSlice」→「$cleanWord」· 原句：${old.text}",
+            focusClauseId = old.id,
+        )
         val delta = cleanWord.length - (endIdx - startIdx)
         val adjustedAnns = old.softAnnotations.mapNotNull { ann ->
             val annEnd = ann.charIndex + ann.length
@@ -295,9 +332,15 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val book = readBookUnlocked(folder) ?: return null
         val idx = book.clauses.indexOfFirst { it.id == clauseId }
         if (idx < 0) return Pair(book, null)
-
-        timeMachine.recordSnapshot(book, "擦除句子", "erase_clause")
         val removed = book.clauses[idx]
+
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "擦除句子",
+            toolName = "erase_clause",
+            changeSummary = "擦除前含：「${removed.text}」",
+            focusClauseId = removed.id,
+        )
         val list = book.clauses.toMutableList().apply { removeAt(idx) }
         val updated = book.copy(clauses = list, updatedAtMs = System.currentTimeMillis())
         saveBookUnlocked(updated)
@@ -312,9 +355,16 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val book = readBookUnlocked(folder) ?: return null
         val idx = book.clauses.indexOfFirst { it.id == clauseId }
         if (idx < 0) return book
-        timeMachine.recordSnapshot(book, "调整分段", "toggle_paragraph_break")
+        val target = book.clauses[idx]
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "调整分段",
+            toolName = "toggle_paragraph_break",
+            changeSummary = "分段调整：「${target.text}」",
+            focusClauseId = target.id,
+        )
         val list = book.clauses.toMutableList()
-        list[idx] = list[idx].copy(paragraphBreakAfter = !list[idx].paragraphBreakAfter)
+        list[idx] = target.copy(paragraphBreakAfter = !target.paragraphBreakAfter)
         val updated = book.copy(clauses = list, updatedAtMs = System.currentTimeMillis())
         saveBookUnlocked(updated)
         updated
@@ -332,9 +382,8 @@ class StoryBookRepository(private val rootStorageDir: File) {
         if (idx < 0) return book
         val old = book.clauses[idx]
         val nextPhrases = contextualPhrases ?: old.contextualPhrases
-        if (old.softAnnotations != annotations || old.contextualPhrases != nextPhrases) {
-            timeMachine.recordSnapshot(book, "轻批注", "annotate_soft_suggestion")
-        }
+        // Background copy-editor metadata never changes story text, so it must NOT pollute Time Machine!
+        if (old.softAnnotations == annotations && old.contextualPhrases == nextPhrases) return book
         val list = book.clauses.toMutableList()
         list[idx] = old.copy(softAnnotations = annotations, contextualPhrases = nextPhrases)
         val updated = book.copy(clauses = list, updatedAtMs = System.currentTimeMillis())
@@ -346,7 +395,15 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val folder = resolveBookFolder(bookId) ?: return null
         val book = readBookUnlocked(folder) ?: return null
         val snap = timeMachine.getSnapshot(bookId, snapshotId) ?: return null
-        timeMachine.recordSnapshot(book, "恢复版本前", "restore_history_snapshot")
+        if (!timeMachine.hasMeaningfulDifference(book, snap)) {
+            return book
+        }
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "恢复版本前",
+            toolName = "restore_history_snapshot",
+            changeSummary = "回到「${snap.actionLabel}」之前的书本状态",
+        )
         val mergedIllustrations = (book.illustrations + snap.illustrations).distinctBy { it.id }
         val restoredActiveIds = snap.activeIllustrationIds.toMutableMap()
         for (ill in mergedIllustrations) {
@@ -370,8 +427,18 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val book = readBookUnlocked(folder) ?: return null
         val snap = timeMachine.getSnapshot(bookId, snapshotId) ?: return null
         val targetClause = snap.clauses.firstOrNull { it.id == clauseId } ?: return null
+        val currentClause = book.clauses.firstOrNull { it.id == clauseId }
+        if (currentClause != null && currentClause.text == targetClause.text && currentClause.audioSpan == targetClause.audioSpan) {
+            return book
+        }
 
-        timeMachine.recordSnapshot(book, "恢复单句前", "restore_history_snapshot")
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "恢复单句前",
+            toolName = "restore_history_snapshot",
+            changeSummary = currentClause?.let { "恢复前：「${it.text}」" } ?: "找回已删句：「${targetClause.text}」",
+            focusClauseId = clauseId,
+        )
         val neededTake = targetClause.audioSpan?.takeId?.let { tid -> snap.takes.firstOrNull { it.id == tid } }
         val nextTakes = if (neededTake != null && book.takes.none { it.id == neededTake.id }) {
             book.takes + neededTake
@@ -393,7 +460,12 @@ class StoryBookRepository(private val rootStorageDir: File) {
     fun attachIllustration(bookId: String, pageIndex: Int, imageFile: File, promptUsed: String): StoryBook? = synchronized(lock) {
         val folder = resolveBookFolder(bookId) ?: return null
         val book = readBookUnlocked(folder) ?: return null
-        timeMachine.recordSnapshot(book, "生成插画", "attach_page_illustration")
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "生成插画",
+            toolName = "attach_page_illustration",
+            changeSummary = "第 ${pageIndex + 1} 页配图前的书本状态",
+        )
         val illId = "ill_${UUID.randomUUID().toString().replace("-", "").take(8)}"
         val relPath = "illustrations/$illId.png"
         val dest = File(folder, relPath).apply { parentFile?.mkdirs() }
@@ -413,7 +485,8 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val folder = resolveBookFolder(bookId) ?: return null
         val book = readBookUnlocked(folder) ?: return null
         if (book.illustrations.none { it.id == illustrationId && it.pageIndex == pageIndex }) return book
-        timeMachine.recordSnapshot(book, "切换插画版本", "select_page_illustration")
+        if (book.activeIllustrationFor(pageIndex)?.id == illustrationId) return book
+        // Switching between already-generated artwork thumbnails is a direct gallery toggle, not a history spam event.
         val nextMap = book.activeIllustrationIds.toMutableMap().apply { put(pageIndex, illustrationId) }
         val updated = book.copy(activeIllustrationIds = nextMap, updatedAtMs = System.currentTimeMillis())
         saveBookUnlocked(updated)
@@ -471,38 +544,6 @@ class StoryBookRepository(private val rootStorageDir: File) {
         clause: Clause,
     ): Pair<List<CollectedWordCard>, Boolean> = wordBox.addCard(word, pinyins, book, clause)
 
-    private fun resolveWavDurMs(wavFile: File?, fallbackSec: Double): Long =
-        if (wavFile != null && wavFile.isFile && wavFile.length() > 44L) {
-            WavAudioFiles.wavDurationMs(wavFile).takeIf { it > 0L } ?: (fallbackSec * 1000.0).toLong().coerceAtLeast(0L)
-        } else {
-            (fallbackSec * 1000.0).toLong().coerceAtLeast(0L)
-        }
-
-    private fun registerTakeUnlocked(
-        bookFolder: File,
-        existingTakes: List<AudioTake>,
-        takeId: String,
-        wavFile: File?,
-        durationMs: Long,
-    ): List<AudioTake> {
-        if (wavFile == null || !wavFile.isFile || wavFile.length() <= 44L) return existingTakes
-        val takesDir = File(bookFolder, "takes").apply { mkdirs() }
-        val dest = File(takesDir, "$takeId.wav")
-        if (wavFile.absolutePath != dest.absolutePath && !wavFile.renameTo(dest)) {
-            wavFile.copyTo(dest, overwrite = true)
-        }
-        val measuredDur = WavAudioFiles.wavDurationMs(dest).takeIf { it > 0L } ?: durationMs.coerceAtLeast(0L)
-        val rel = "takes/$takeId.wav"
-        val existingIdx = existingTakes.indexOfFirst { it.id == takeId }
-        val newTake = AudioTake(
-            id = takeId,
-            wavFileName = rel,
-            durationMs = measuredDur,
-            createdAtEpochMs = existingTakes.getOrNull(existingIdx)?.createdAtEpochMs ?: System.currentTimeMillis(),
-        )
-        return if (existingIdx >= 0) existingTakes.toMutableList().apply { set(existingIdx, newTake) } else existingTakes + newTake
-    }
-
     private fun nextBookNumberUnlocked(): Int {
         val dirs = booksDir.listFiles() ?: return 1
         var maxNum = 0
@@ -537,39 +578,7 @@ class StoryBookRepository(private val rootStorageDir: File) {
                 return migrated
             }
 
-            val cArr = obj.optJSONArray("clauses")
-            val clauses = if (cArr != null) {
-                (0 until cArr.length()).mapNotNull { i -> cArr.optJSONObject(i)?.let { BookJsonCodec.decodeClause(it, i) } }
-            } else {
-                emptyList()
-            }
-            val tArr = obj.optJSONArray("takes")
-            val takes = if (tArr != null) {
-                (0 until tArr.length()).mapNotNull { i -> tArr.optJSONObject(i)?.let(BookJsonCodec::decodeTake) }
-            } else {
-                emptyList()
-            }
-            val iArr = obj.optJSONArray("illustrations")
-            val ills = if (iArr != null) {
-                (0 until iArr.length()).mapNotNull { i -> iArr.optJSONObject(i)?.let(BookJsonCodec::decodeIllustration) }
-            } else {
-                emptyList()
-            }
-            StoryBook(
-                id = id,
-                bookNumber = num,
-                title = obj.optString("title", "未命名故事"),
-                titleAudioFileName = obj.optString("title_audio_file", ""),
-                coverColorIndex = obj.optInt("cover_color_index", 0),
-                emblemIndex = obj.optInt("emblem_index", 0),
-                clauses = clauses,
-                takes = takes,
-                illustrations = ills,
-                activeIllustrationIds = BookJsonCodec.decodeActiveIllustrations(obj.optJSONObject("active_illustrations")),
-                createdAtMs = createdAt,
-                updatedAtMs = updatedAt,
-                bookDir = folder,
-            )
+            BookJsonCodec.decodeBookV4(obj, folder, id, num, createdAt, updatedAt)
         } catch (_: Exception) {
             null
         }

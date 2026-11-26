@@ -60,6 +60,7 @@ internal fun ReaderActionPill(
     onIllustratePage: () -> Unit,
     onTriggerSpark: () -> Unit,
     onOpenTimeMachine: () -> Unit,
+    compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -70,8 +71,8 @@ internal fun ReaderActionPill(
         shadowElevation = 2.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.padding(horizontal = if (compact) 4.dp else 6.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 1.dp else 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             LabelledCapsuleButton(
@@ -83,6 +84,7 @@ internal fun ReaderActionPill(
                 },
                 containerColor = if (isFullBookPlaying) HighlightSun else Color.Transparent,
                 enabled = hasContent,
+                compact = compact,
                 onClick = onToggleReadAlong,
                 modifier = Modifier
                     .testTag("read_along_button")
@@ -105,6 +107,7 @@ internal fun ReaderActionPill(
                     labelColor = if (isIllustratingThisPage) Vermilion else if (isIllustratingAnyPage) InkSubtle else InkPrimary,
                     containerColor = if (isIllustratingThisPage) HighlightSun else Color.Transparent,
                     enabled = !isIllustratingAnyPage,
+                    compact = compact,
                     onClick = onIllustratePage,
                     modifier = Modifier
                         .testTag("illustrate_page_button")
@@ -112,7 +115,7 @@ internal fun ReaderActionPill(
                 ) {
                     IconIllustratePage(
                         color = if (isIllustratingThisPage) Vermilion else if (isIllustratingAnyPage) InkSubtle else InkPrimary,
-                        size = 15.dp,
+                        size = 14.dp,
                     )
                 }
 
@@ -122,12 +125,13 @@ internal fun ReaderActionPill(
                     labelColor = JadeInk,
                     containerColor = if (isVoiceSparkSpeaking) JadeSoft else Color.Transparent,
                     enabled = !isVoiceSparkSpeaking,
+                    compact = compact,
                     onClick = onTriggerSpark,
                     modifier = Modifier
                         .testTag("spark_star_button")
                         .semantics { contentDescription = "灵感" },
                 ) {
-                    IconSparkStar(color = JadeInk, size = 15.dp)
+                    IconSparkStar(color = JadeInk, size = 14.dp)
                 }
             }
 
@@ -135,12 +139,13 @@ internal fun ReaderActionPill(
             LabelledCapsuleButton(
                 label = "历史",
                 labelColor = InkPrimary,
+                compact = compact,
                 onClick = onOpenTimeMachine,
                 modifier = Modifier
                     .testTag("time_machine_button")
                     .semantics { contentDescription = "历史" },
             ) {
-                IconTimeMachine(color = InkPrimary, size = 15.dp)
+                IconTimeMachine(color = InkPrimary, size = 14.dp)
             }
         }
     }
@@ -215,13 +220,13 @@ internal fun FloatingSentenceEditCapsule(
 
             if (showVoiceRevise) {
                 LabelledCapsuleButton(
-                    label = "改字",
+                    label = "AI调整",
                     labelColor = Vermilion,
                     containerColor = BookPaperWarm,
                     onClick = onVoiceRevise,
                     modifier = Modifier
                         .testTag("edit_voice_revise_button")
-                        .semantics { contentDescription = "语音改字" },
+                        .semantics { contentDescription = "AI调整" },
                 ) {
                     IconVoiceRevise(color = Vermilion, size = 15.dp)
                 }
@@ -274,22 +279,23 @@ private fun LabelledCapsuleButton(
     modifier: Modifier = Modifier,
     containerColor: Color = Color.Transparent,
     enabled: Boolean = true,
+    compact: Boolean = false,
     icon: @Composable () -> Unit,
 ) {
     Row(
         modifier = modifier
-            .height(32.dp)
+            .height(if (compact) 30.dp else 32.dp)
             .clip(CircleShape)
             .background(containerColor)
             .springPressScale(pressedScale = 0.92f, enabled = enabled, onClick = onClick)
-            .padding(horizontal = 9.dp),
+            .padding(horizontal = if (compact) 6.dp else 9.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 4.dp),
     ) {
         icon()
         Text(
             text = label,
-            fontSize = 11.5.sp,
+            fontSize = if (compact) 11.sp else 11.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = labelColor,
             maxLines = 1,

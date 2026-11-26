@@ -88,25 +88,41 @@ class AudioPlaybackCoordinator(
         onStateChanged(clause.id, true, targetPage)
 
         val resolved = book.resolveAudio(clause)
-        if (resolved != null) {
+        val hasUsableAudio = if (resolved != null) {
             val (wav, span) = resolved
-            startRangePlayback(wav, span.startMs, span.endMs) {
+            val invalidSpan = span.endMs in 1L..(span.startMs + 5L)
+            wav.isFile && wav.canRead() && wav.length() > 44L && !invalidSpan &&
+                !WavAudioFiles.isRangeNearSilent(wav, span.startMs, span.endMs)
+        } else {
+            false
+        }
+
+        if (hasUsableAudio && resolved != null) {
+            val (wav, span) = resolved
+            val started = startRangePlayback(wav, span.startMs, span.endMs) {
                 scope.launch {
                     if (playbackGeneration.get() == gen && isStillFullBookPlaying()) {
-                        delay(180L)
+                        delay(200L)
                         if (playbackGeneration.get() == gen && isStillFullBookPlaying()) {
                             playBookFromClauseIndex(bookId, index + 1)
                         }
                     }
                 }
             }
+            if (!started) {
+                speakClauseThenContinue(bookId, index, clause, gen)
+            }
         } else {
-            env.speakStandardWord(clause.text)
-            scope.launch {
-                delay((clause.text.length * 260L).coerceIn(1200L, 4500L))
-                if (playbackGeneration.get() == gen && isStillFullBookPlaying()) {
-                    playBookFromClauseIndex(bookId, index + 1)
-                }
+            speakClauseThenContinue(bookId, index, clause, gen)
+        }
+    }
+
+    private fun speakClauseThenContinue(bookId: String, index: Int, clause: Clause, gen: Long) {
+        env.speakStandardWord(clause.text)
+        scope.launch {
+            delay((clause.text.length * 290L).coerceIn(1300L, 5200L))
+            if (playbackGeneration.get() == gen && isStillFullBookPlaying()) {
+                playBookFromClauseIndex(bookId, index + 1)
             }
         }
     }
@@ -148,6 +164,7 @@ class AudioPlaybackCoordinator(
         playbackGeneration.incrementAndGet()
         audioPlayer?.stop()
         audioPlayer = null
+        env.stopSpeaking()
         onStateChanged(null, false, null)
     }
 

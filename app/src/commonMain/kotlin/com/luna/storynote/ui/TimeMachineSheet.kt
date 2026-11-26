@@ -189,7 +189,7 @@ internal fun TimeMachineSheet(
 
                 if (clauseScoped && targetClauseId != null) {
                     if (clauseEntries.isEmpty()) {
-                        EmptyHistoryBox()
+                        EmptyHistoryBox(label = "这句话还没有修改记录")
                     } else {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(clauseEntries, key = { it.snapshotId }) { entry ->
@@ -204,9 +204,11 @@ internal fun TimeMachineSheet(
                         }
                     }
                 } else {
-                    val snaps = uiState.timeMachineSnapshots
+                    val snaps = remember(book, uiState.timeMachineSnapshots) {
+                        controller.repo.timeMachine.listMeaningfulSnapshots(book)
+                    }
                     if (snaps.isEmpty()) {
-                        EmptyHistoryBox()
+                        EmptyHistoryBox(label = "还没有修改记录")
                     } else {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(snaps, key = { it.id }) { snap ->
@@ -229,14 +231,14 @@ internal fun TimeMachineSheet(
 }
 
 @Composable
-private fun EmptyHistoryBox() {
+private fun EmptyHistoryBox(label: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 32.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = "0", fontFamily = FontFamily.Serif, fontSize = 16.sp, color = InkSubtle)
+        Text(text = label, fontSize = 14.sp, color = InkSubtle)
     }
 }
 
@@ -301,7 +303,10 @@ private fun SnapshotHistoryRow(
     onPlay: () -> Unit,
     onRestore: () -> Unit,
 ) {
-    val snippet = snap.clauses.firstOrNull()?.text ?: ""
+    val focusClause = snap.focusClauseId?.let { fid -> snap.clauses.firstOrNull { it.id == fid } }
+    val snippet = snap.changeSummary.ifBlank {
+        focusClause?.text ?: snap.clauses.lastOrNull()?.text.orEmpty()
+    }
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = BookPaperWarm,
@@ -324,9 +329,9 @@ private fun SnapshotHistoryRow(
                     Text(
                         text = snippet,
                         fontFamily = bookFont,
-                        fontSize = 15.sp,
+                        fontSize = 14.5.sp,
                         color = InkPrimary,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -373,7 +378,10 @@ private fun HistoryActionButton(
 }
 
 private fun snapshotPreviewAudio(book: StoryBook, snap: TimeMachineSnapshot): ClauseHistoryEntry? {
-    val clause = snap.clauses.firstOrNull { it.audioSpan != null } ?: return null
+    val clause = snap.focusClauseId
+        ?.let { fid -> snap.clauses.firstOrNull { it.id == fid && it.audioSpan != null } }
+        ?: snap.clauses.lastOrNull { it.audioSpan != null }
+        ?: return null
     val span = clause.audioSpan ?: return null
     val take = snap.takes.firstOrNull { it.id == span.takeId } ?: book.takeById(span.takeId) ?: return null
     val wav = File(book.bookDir, take.wavFileName).takeIf { it.isFile } ?: return null
@@ -384,5 +392,6 @@ private fun snapshotPreviewAudio(book: StoryBook, snap: TimeMachineSnapshot): Cl
         clause = clause,
         wavFile = wav,
         audioSpan = span,
+        changeSummary = snap.changeSummary,
     )
 }

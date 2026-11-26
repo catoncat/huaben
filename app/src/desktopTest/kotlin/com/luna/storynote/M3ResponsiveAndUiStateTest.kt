@@ -254,7 +254,6 @@ class M3ResponsiveAndUiStateTest {
             val created = repo.createBlankBook()
             // Page 0: two paragraphs (maxParas = 2)
             repo.insertUtteranceWithClauses(created.id, null, "第一段。", "", null, 0L, 0L, 0L, forceParagraphBreak = true)
-            val onePageSnapId = repo.timeMachine.listSnapshots(created.id).first().id
             repo.insertUtteranceWithClauses(
                 created.id,
                 repo.getBook(created.id)!!.clauses.last().id,
@@ -266,7 +265,7 @@ class M3ResponsiveAndUiStateTest {
                 0L,
                 forceParagraphBreak = true,
             )
-            // Page 1: third paragraph
+            // Page 1: third paragraph (snapshots the 1-page 2-paragraph book before expanding to 2 pages)
             repo.insertUtteranceWithClauses(
                 created.id,
                 repo.getBook(created.id)!!.clauses.last().id,
@@ -278,6 +277,7 @@ class M3ResponsiveAndUiStateTest {
                 0L,
                 forceParagraphBreak = true,
             )
+            val onePageSnapId = repo.timeMachine.listSnapshots(created.id).first().id
             assertEquals(2, repo.getBook(created.id)!!.paginate().size)
 
             val controller = BookStudioController(env)

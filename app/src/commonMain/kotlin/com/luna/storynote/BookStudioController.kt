@@ -28,8 +28,14 @@ import com.luna.storynote.model.StudioUiState
 import com.luna.storynote.model.UiMotionEvent
 import com.luna.storynote.model.UndoDeletedClause
 import com.luna.storynote.storage.AiConfigStore
+import com.luna.storynote.storage.BookExportMode
 import com.luna.storynote.storage.ClauseHistoryEntry
 import com.luna.storynote.storage.StoryBookRepository
+import com.luna.storynote.update.AppUpdateConfig
+import com.luna.storynote.update.AppUpdateCoordinator
+import com.luna.storynote.update.AppUpdateManager
+import com.luna.storynote.update.AvailableAppUpdate
+import com.luna.storynote.update.UpdateConfigStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,6 +66,14 @@ class BookStudioController(
 
     private val aiSettings = AiSettingsCoordinator(env, aiConfigStore, aiGatewayClient, scope, _uiState)
     private val aiCoordinator = BookAiCoordinator(env, toolBus, aiGatewayClient, scope, _uiState, ::refreshBookState, ::postNotice)
+    private val updateCoordinator = AppUpdateCoordinator(
+        env = env,
+        configStore = UpdateConfigStore(env.privateConfigDir),
+        updateManager = AppUpdateManager(),
+        scope = scope,
+        uiState = _uiState,
+        postNotice = ::postNotice,
+    )
     private val utteranceHandler = CommittedUtteranceHandler(
         repo = repo, toolBus = toolBus, scope = scope, uiState = _uiState, refreshBookState = ::refreshBookState,
         onSpeechLanded = { bId, cIds -> aiCoordinator.scheduleSilentCopyEdit(bId, cIds) },
@@ -114,6 +128,7 @@ class BookStudioController(
             _uiState.update { it.copy(books = books, collectedWords = words, aiConfig = aiCfg) }
             runCatching { authRepo.resolve(forceRefresh = false) }
         }
+        updateCoordinator.initAndMaybeAutoCheck()
     }
 
     private fun postNotice(msg: String) {
@@ -440,6 +455,28 @@ class BookStudioController(
     suspend fun testAiConnection(config: AiGatewayConfig): AiConnectionTestResult = aiSettings.testConnection(config)
     fun testAiConnectivity(config: AiGatewayConfig) = aiSettings.testConnectivity(config)
 
+    fun exportBook(book: StoryBook, mode: BookExportMode = BookExportMode.FULL_BUNDLE) {
+        postNotice(
+            when (mode) {
+                BookExportMode.AUDIO_ONLY -> "正在合并完整录音…"
+                BookExportMode.FULL_BUNDLE -> "正在打包故事录音与图文…"
+                BookExportMode.TEXT_ONLY -> "正在导出故事文字…"
+            },
+        )
+        scope.launch(Dispatchers.IO) {
+            val latest = repo.getBook(book.id) ?: book
+            val msg = runCatching { env.exportBook(latest, mode) }
+                .getOrElse { "导出失败：${it.message ?: "请稍后重试"}" }
+            if (msg.isNotBlank()) postNotice(msg)
+        }
+    }
+
+    fun checkForAppUpdate(silent: Boolean = false) = updateCoordinator.checkNow(silent)
+    fun saveUpdateConfig(config: AppUpdateConfig) = updateCoordinator.saveUpdateConfig(config)
+    fun downloadAndInstallUpdate(update: AvailableAppUpdate) = updateCoordinator.downloadAndInstall(update)
+    fun installReadyUpdateApk(apkFile: File) = updateCoordinator.triggerInstallReadyApk(apkFile)
+    fun openReleasePage(url: String) = updateCoordinator.openReleasePage(url)
+
     fun deleteBook(bookId: String) {
         stopAllAudioAndMic(); aiCoordinator.cancelForBook(bookId)
         scope.launch(Dispatchers.IO) {
@@ -452,5 +489,5 @@ class BookStudioController(
     }
 
     private fun stopAllAudioAndMic() { stopAudioPlayback(); if (_uiState.value.isRecording) stopRecording() }
-    fun dispose() { stopAllAudioAndMic(); aiCoordinator.cancelAll(); scope.cancel() }
+    fun dispose() { stopAllAudioAndMic(); aiCoordinator.cancelAll(); updateCoordinator.cancelAll(); scope.cancel() }
 }

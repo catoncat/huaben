@@ -7,16 +7,23 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.platform.Font
 import com.luna.storynote.audio.FrontierProtocol
+import com.luna.storynote.audio.WavAudioFiles
 import com.luna.storynote.model.AiGatewayConfig
 import com.luna.storynote.model.StoryBook
+import com.luna.storynote.storage.BookExportMode
+import com.luna.storynote.storage.BookExporter
+import com.luna.storynote.storage.BookJsonCodec
 import org.jetbrains.skia.Image as SkiaImage
 import org.json.JSONObject
 import java.awt.Desktop
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
+import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
 import javax.sound.sampled.DataLine
@@ -134,15 +141,87 @@ class DesktopPlatformEnvironment(
         }
     }
 
+    override fun loadDefaultGithubToken(): String {
+        val envToken = System.getenv("GITHUB_TOKEN")?.trim().orEmpty()
+        if (envToken.isNotEmpty()) return envToken
+        return try {
+            val proc = ProcessBuilder("/opt/homebrew/bin/gh", "auth", "token")
+                .redirectErrorStream(false)
+                .start()
+            val out = proc.inputStream.bufferedReader(Charsets.UTF_8).readText().trim()
+            if (proc.waitFor() == 0 && out.startsWith("gh")) out else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     override fun openStrokeAssetStream(): InputStream? =
         DesktopPlatformEnvironment::class.java.getResourceAsStream("/strokes.bin.gz")
 
     override fun setKeepScreenAwake(keepAwake: Boolean) = Unit
 
-    override fun exportBook(book: StoryBook) {
+    override fun exportBook(book: StoryBook, mode: BookExportMode): String {
+        val downloadsDir = File(System.getProperty("user.home"), "Downloads/StoryNoteExports")
+        val safeTitle = BookExporter.sanitizeFileName(book.title)
+        val outDir = File(downloadsDir, safeTitle).apply { mkdirs() }
+        return try {
+            val highlightTarget: File
+            val message: String
+            when (mode) {
+                BookExportMode.TEXT_ONLY -> {
+                    val mdFile = File(outDir, "$safeTitle.md")
+                    BookJsonCodec.atomicWriteText(mdFile, BookJsonCodec.renderBookMarkdown(book))
+                    val htmlFile = File(outDir, "${safeTitle}_带拼音绘本.html")
+                    BookJsonCodec.atomicWriteText(htmlFile, BookExporter.renderBookRubyHtml(book))
+                    highlightTarget = htmlFile
+                    message = "已导出文稿与拼音绘本到 Downloads/StoryNoteExports/$safeTitle"
+                }
+                BookExportMode.AUDIO_ONLY -> {
+                    val wavFile = File(outDir, "${safeTitle}_完整录音.wav")
+                    val merged = BookExporter.exportMergedAudio(book, wavFile)
+                        ?: return "这本书还没有录制原声"
+                    highlightTarget = merged.first
+                    val secs = merged.second.toInt().coerceAtLeast(1)
+                    message = "已合并完整录音（约 ${secs} 秒）到 Downloads/StoryNoteExports/$safeTitle"
+                }
+                BookExportMode.FULL_BUNDLE -> {
+                    val res = BookExporter.exportBookBundle(book, outDir)
+                    highlightTarget = res.zipBundleFile
+                    message = if (res.mergedAudioFile != null) {
+                        "已导出录音、拼音绘本与故事包到 Downloads/StoryNoteExports/$safeTitle"
+                    } else {
+                        "已导出拼音绘本与故事包到 Downloads/StoryNoteExports/$safeTitle"
+                    }
+                }
+            }
+            revealInFinder(highlightTarget)
+            message
+        } catch (e: Exception) {
+            "导出失败：${e.message ?: "请检查磁盘空间"}"
+        }
+    }
+
+    override fun installUpdateApk(apkFile: File): String {
+        revealInFinder(apkFile)
+        return "新版 APK 已下载，已在 Finder 中定位（可传至安卓平板/手机安装）"
+    }
+
+    override fun openExternalUrl(url: String) {
         try {
             if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().open(book.bookDir)
+                Desktop.getDesktop().browse(URI(url))
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun revealInFinder(target: File) {
+        try {
+            val os = System.getProperty("os.name").orEmpty().lowercase()
+            if (os.contains("mac")) {
+                ProcessBuilder("/usr/bin/open", "-R", target.absolutePath).start()
+            } else if (Desktop.isDesktopSupported()) {
+                Desktop.getDesktop().open(target.parentFile ?: target)
             }
         } catch (_: Exception) {
         }
@@ -253,17 +332,50 @@ private class DesktopWavPlayer : PlatformAudioPlayer {
             var openedClip: Clip? = null
             var installed = false
             try {
-                val c: Clip = AudioSystem.getAudioInputStream(wavFile).use { stream ->
-                    val candidate = AudioSystem.getClip()
-                    openedClip = candidate
-                    candidate.open(stream)
-                    candidate
+                // Decode the exact requested range into an in-memory AudioInputStream so playback always starts
+                // cleanly at frame 0 and runs to exact EOF without macOS CoreAudio microsecondPosition race bugs.
+                val slice = WavAudioFiles.readPcmRange(wavFile, startMs, endMs)
+                if (slice != null && slice.pcmBytes.isEmpty()) {
+                    val shouldComplete = synchronized(lock) {
+                        val active = !manuallyStopped && currentToken === token
+                        if (currentToken === token) {
+                            currentToken = null
+                            activePlaying = false
+                        }
+                        active
+                    }
+                    if (shouldComplete && completedFired.compareAndSet(false, true)) {
+                        immediateCompletionToFire = onCompleted
+                    }
+                    return@synchronized
                 }
-                val totalUs = c.microsecondLength.coerceAtLeast(0L)
-                val startUs = (startMs.coerceAtLeast(0L) * 1000L).coerceIn(0L, totalUs)
-                val targetEndUs = if (endMs <= 0L) totalUs else (endMs * 1000L).coerceIn(startUs, totalUs)
 
-                if (totalUs <= 0L || targetEndUs <= startUs + 5_000L) {
+                val c: Clip = if (slice != null) {
+                    val fmt = AudioFormat(
+                        slice.format.sampleRate.toFloat(),
+                        slice.format.bitsPerSample,
+                        slice.format.channels,
+                        slice.format.bitsPerSample > 8,
+                        false,
+                    )
+                    val frameCount = (slice.pcmBytes.size / slice.format.blockAlign).toLong()
+                    AudioInputStream(ByteArrayInputStream(slice.pcmBytes), fmt, frameCount).use { stream ->
+                        val candidate = AudioSystem.getClip()
+                        openedClip = candidate
+                        candidate.open(stream)
+                        candidate
+                    }
+                } else {
+                    AudioSystem.getAudioInputStream(wavFile).use { stream ->
+                        val candidate = AudioSystem.getClip()
+                        openedClip = candidate
+                        candidate.open(stream)
+                        candidate
+                    }
+                }
+
+                val totalUs = c.microsecondLength.coerceAtLeast(0L)
+                if (totalUs <= 10_000L) {
                     closeClipAsync(c)
                     openedClip = null
                     val shouldComplete = synchronized(lock) {
@@ -280,7 +392,7 @@ private class DesktopWavPlayer : PlatformAudioPlayer {
                     return@synchronized
                 }
 
-                c.microsecondPosition = startUs
+                c.framePosition = 0
                 c.addLineListener { ev ->
                     if (ev.type == LineEvent.Type.STOP) {
                         var clipToClose: Clip? = null
@@ -288,13 +400,11 @@ private class DesktopWavPlayer : PlatformAudioPlayer {
                         synchronized(lock) {
                             if (currentToken === token && clip === c) {
                                 activePlaying = false
-                                if (!manuallyStopped && c.microsecondPosition >= (targetEndUs - 45_000L)) {
+                                if (!manuallyStopped) {
                                     shouldNotify = true
-                                    if (endMs <= 0L) {
-                                        clip = null
-                                        currentToken = null
-                                        clipToClose = c
-                                    }
+                                    clip = null
+                                    currentToken = null
+                                    clipToClose = c
                                 }
                             }
                         }
@@ -305,59 +415,13 @@ private class DesktopWavPlayer : PlatformAudioPlayer {
                     }
                 }
 
-                val wt: Thread? = if (endMs > 0L) {
-                    Thread(
-                        {
-                            try {
-                                while (true) {
-                                    val stillActive = synchronized(lock) {
-                                        !manuallyStopped && currentToken === token && clip === c
-                                    }
-                                    if (!stillActive) return@Thread
-                                    val posUs = c.microsecondPosition
-                                    if (posUs >= targetEndUs || (!c.isActive && posUs > startUs)) {
-                                        break
-                                    }
-                                    Thread.sleep(15L)
-                                }
-                                val ownsClip = synchronized(lock) {
-                                    if (manuallyStopped || currentToken !== token || clip !== c) {
-                                        false
-                                    } else {
-                                        clip = null
-                                        currentToken = null
-                                        if (watcherThread === Thread.currentThread()) {
-                                            watcherThread = null
-                                        }
-                                        activePlaying = false
-                                        true
-                                    }
-                                }
-                                if (ownsClip) {
-                                    try { c.stop() } catch (_: Exception) {}
-                                    closeClipAsync(c)
-                                    if (completedFired.compareAndSet(false, true)) {
-                                        onCompleted()
-                                    }
-                                }
-                            } catch (_: InterruptedException) {
-                            }
-                        },
-                        "desktop-wav-range-watcher",
-                    ).apply {
-                        isDaemon = true
-                    }
-                } else {
-                    null
-                }
-
                 val canStart = synchronized(lock) {
                     if (manuallyStopped || currentToken !== token) {
                         false
                     } else {
                         clip = c
                         activePlaying = true
-                        watcherThread = wt
+                        watcherThread = null
                         installed = true
                         true
                     }
@@ -369,7 +433,6 @@ private class DesktopWavPlayer : PlatformAudioPlayer {
                 }
 
                 c.start()
-                wt?.start()
             } catch (_: Throwable) {
                 if (!installed) {
                     synchronized(lock) {

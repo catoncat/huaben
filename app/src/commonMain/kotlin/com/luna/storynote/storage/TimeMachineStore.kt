@@ -16,6 +16,7 @@ data class ClauseHistoryEntry(
     val clause: Clause,
     val wavFile: File?,
     val audioSpan: AudioSpan?,
+    val changeSummary: String = "",
 )
 
 class TimeMachineStore(private val booksDir: File) {
@@ -25,10 +26,39 @@ class TimeMachineStore(private val booksDir: File) {
     private fun historyDir(bookId: String): File =
         File(File(booksDir, bookId), "history").apply { mkdirs() }
 
+    /**
+     * Deterministic content signature ignoring ephemeral metadata (`softAnnotations`, `contextualPhrases`),
+     * used to prevent recording duplicate/no-op snapshots when nothing in the child's story actually changed.
+     */
+    fun contentFingerprint(
+        clauses: List<Clause>,
+        activeIllustrationIds: Map<Int, String>,
+    ): String = buildString {
+        for (c in clauses) {
+            append(c.id).append('|').append(c.text).append('|').append(c.paragraphBreakAfter).append('|')
+            c.audioSpan?.let { s ->
+                append(s.takeId).append(':').append(s.startMs).append('-').append(s.endMs)
+            }
+            append('\n')
+        }
+        append("#ILL:")
+        activeIllustrationIds.toSortedMap().forEach { (k, v) ->
+            if (v.isNotBlank()) append(k).append('=').append(v).append(';')
+        }
+    }
+
+    fun hasMeaningfulDifference(book: StoryBook, snapshot: TimeMachineSnapshot): Boolean {
+        val curFp = contentFingerprint(book.clauses, book.activeIllustrationIds)
+        val snapFp = contentFingerprint(snapshot.clauses, snapshot.activeIllustrationIds)
+        return curFp != snapFp
+    }
+
     fun recordSnapshot(
         book: StoryBook,
         actionLabel: String,
         toolName: String,
+        changeSummary: String = "",
+        focusClauseId: String? = null,
     ): TimeMachineSnapshot = synchronized(lock) {
         val now = System.currentTimeMillis()
         val seq = sequence.incrementAndGet() % 1_000_000L
@@ -43,6 +73,8 @@ class TimeMachineStore(private val booksDir: File) {
             takes = book.takes,
             illustrations = book.illustrations,
             activeIllustrationIds = book.activeIllustrationIds,
+            changeSummary = changeSummary,
+            focusClauseId = focusClauseId,
         )
         val fileName = "${"%013d".format(now)}_${"%06d".format(seq)}_$snapId.json"
         val target = File(historyDir(book.id), fileName)
@@ -64,19 +96,45 @@ class TimeMachineStore(private val booksDir: File) {
             }
     }
 
+    /**
+     * User-facing meaningful history list: hides noisy background metadata snapshots (`轻批注`, `切换插画版本`)
+     * and collapses consecutive snapshots that have identical story content.
+     */
+    fun listMeaningfulSnapshots(book: StoryBook): List<TimeMachineSnapshot> {
+        val raw = listSnapshots(book.id)
+        val out = mutableListOf<TimeMachineSnapshot>()
+        val currentFp = contentFingerprint(book.clauses, book.activeIllustrationIds)
+        var lastFp: String? = null
+
+        for (snap in raw) {
+            if (snap.toolName in HIDDEN_NOISE_TOOLS) continue
+            val fp = contentFingerprint(snap.clauses, snap.activeIllustrationIds)
+            // Skip redundant no-op snapshot identical to previous row or identical to live state with no change summary
+            if (fp == lastFp) continue
+            if (out.isEmpty() && fp == currentFp && snap.toolName == "restore_history_snapshot") continue
+            lastFp = fp
+            out.add(snap)
+        }
+        return out
+    }
+
     fun getSnapshot(bookId: String, snapshotId: String): TimeMachineSnapshot? =
         listSnapshots(bookId).firstOrNull { it.id == snapshotId }
 
     fun findClauseHistory(book: StoryBook, clauseId: String): List<ClauseHistoryEntry> {
         val snapshots = listSnapshots(book.id)
+        val currentClause = book.clauses.firstOrNull { it.id == clauseId }
+        val currentSig = currentClause?.let { it.text to it.audioSpan }
         val out = mutableListOf<ClauseHistoryEntry>()
-        var lastSignature: Pair<String, AudioSpan?>? = null
+        val seenSigs = HashSet<Pair<String, AudioSpan?>>()
 
         for (snap in snapshots) {
+            if (snap.toolName in HIDDEN_NOISE_TOOLS) continue
             val clause = snap.clauses.firstOrNull { it.id == clauseId } ?: continue
             val sig = clause.text to clause.audioSpan
-            if (sig == lastSignature) continue
-            lastSignature = sig
+            // Only show genuinely different previous versions of this clause (never mirror live identical state)
+            if (sig == currentSig) continue
+            if (!seenSigs.add(sig)) continue
 
             val span = clause.audioSpan
             val take = span?.let { s -> snap.takes.firstOrNull { it.id == s.takeId } ?: book.takeById(s.takeId) }
@@ -89,6 +147,7 @@ class TimeMachineStore(private val booksDir: File) {
                     clause = clause,
                     wavFile = wavFile,
                     audioSpan = span,
+                    changeSummary = snap.changeSummary,
                 ),
             )
         }
@@ -105,5 +164,12 @@ class TimeMachineStore(private val booksDir: File) {
             snap.illustrations.forEach { if (it.imageFileName.isNotBlank()) paths.add(it.imageFileName) }
         }
         return paths
+    }
+
+    companion object {
+        private val HIDDEN_NOISE_TOOLS = setOf(
+            "annotate_soft_suggestion",
+            "select_page_illustration",
+        )
     }
 }

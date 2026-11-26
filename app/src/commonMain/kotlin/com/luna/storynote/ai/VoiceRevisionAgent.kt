@@ -52,94 +52,130 @@ class VoiceRevisionAgent(
         ) as? ToolResult.Success
         val bible = bibleRes?.bible ?: BookBible(bookId = bookId)
 
-        val messages = buildMessages(book.title, clause, bible, cleanInstruction)
+        val messages = buildMessages(book.title, book.clauses, clause, bible, cleanInstruction)
         val resp = aiClient.chatWithTools(
             config = config,
             messages = messages,
             tools = listOf(REPLACE_SPAN_TOOL_SPEC),
             temperature = 0.1,
-            maxTokens = 512,
+            maxTokens = 768,
             toolChoice = "required",
         )
 
-        val args = resp.toolCalls.firstOrNull { it.name == ToolId.REPLACE_SPAN.toolName }?.arguments
-            ?: parseJsonFallback(resp.content)
-            ?: return VoiceRevisionResult(false, clauseId, null, "未生成替换操作")
-        val targetClauseId = args.optString("clause_id", args.optString("clauseId", clauseId))
-            .trim()
-            .ifEmpty { clauseId }
-        if (targetClauseId != clauseId) {
-            return VoiceRevisionResult(false, clauseId, null, "替换目标超出当前句子")
+        val rawCalls = resp.toolCalls.filter { it.name == ToolId.REPLACE_SPAN.toolName }.map { it.arguments }
+        val calls = rawCalls.ifEmpty {
+            parseJsonFallback(resp.content)?.let { listOf(it) }.orEmpty()
+        }
+        if (calls.isEmpty()) {
+            return VoiceRevisionResult(false, clauseId, null, "未生成替换操作")
         }
 
-        val replacement = args.optString("replacement", args.optString("replacementWord", "")).trim()
-        if (replacement.isEmpty()) {
-            return VoiceRevisionResult(false, clauseId, null, "替换内容为空")
-        }
+        val validClauseIds = book.clauses.map { it.id }.toHashSet()
+        var appliedCount = 0
+        var lastError: String? = null
+        var latestBook = book
 
-        val rawStart = when {
-            args.has("start_index") -> args.optInt("start_index", -1)
-            args.has("startIndex") -> args.optInt("startIndex", -1)
-            else -> -1
-        }
-        val rawEnd = when {
-            args.has("end_index") -> args.optInt("end_index", -1)
-            args.has("endIndex") -> args.optInt("endIndex", -1)
-            else -> -1
-        }
-        val anchor = args.optString("original_span_text", args.optString("originalSpanText", "")).trim()
-        val (startIdx, endIdx) = reconcileSpan(clause.text, rawStart, rawEnd, anchor)
-            ?: return VoiceRevisionResult(false, clauseId, null, "替换范围无效")
-
-        val dispatchRes = toolBus.dispatch(
-            AgentTaskRole.VOICE_REVISION,
-            ToolRequest(
-                ToolId.REPLACE_SPAN,
-                mapOf(
-                    "bookId" to bookId,
-                    "clauseId" to clauseId,
-                    "startIndex" to startIdx,
-                    "endIndex" to endIdx,
-                    "replacement" to replacement,
-                ),
-            ),
-        )
-        return when (dispatchRes) {
-            is ToolResult.Success -> {
-                val updatedText = dispatchRes.book?.clauses?.firstOrNull { it.id == clauseId }?.text
-                VoiceRevisionResult(applied = true, clauseId = clauseId, updatedText = updatedText)
+        for (args in calls.take(6)) {
+            val targetClauseId = args.optString("clause_id", args.optString("clauseId", clauseId))
+                .trim()
+                .ifEmpty { clauseId }
+            if (targetClauseId !in validClauseIds) {
+                lastError = "替换目标句子不存在"
+                continue
             }
-            is ToolResult.Denied -> VoiceRevisionResult(false, clauseId, null, dispatchRes.reason)
-            is ToolResult.Error -> VoiceRevisionResult(false, clauseId, null, dispatchRes.message)
+            val liveClause = latestBook.clauses.firstOrNull { it.id == targetClauseId } ?: continue
+            val replacement = args.optString("replacement", args.optString("replacementWord", "")).trim()
+            if (replacement.isEmpty()) {
+                lastError = "替换内容为空"
+                continue
+            }
+            val rawStart = when {
+                args.has("start_index") -> args.optInt("start_index", -1)
+                args.has("startIndex") -> args.optInt("startIndex", -1)
+                else -> -1
+            }
+            val rawEnd = when {
+                args.has("end_index") -> args.optInt("end_index", -1)
+                args.has("endIndex") -> args.optInt("endIndex", -1)
+                else -> -1
+            }
+            val anchor = args.optString("original_span_text", args.optString("originalSpanText", "")).trim()
+            val (startIdx, endIdx) = reconcileSpan(liveClause.text, rawStart, rawEnd, anchor) ?: run {
+                lastError = "替换范围无效"
+                continue
+            }
+
+            when (
+                val dispatchRes = toolBus.dispatch(
+                    AgentTaskRole.VOICE_REVISION,
+                    ToolRequest(
+                        ToolId.REPLACE_SPAN,
+                        mapOf(
+                            "bookId" to bookId,
+                            "clauseId" to targetClauseId,
+                            "startIndex" to startIdx,
+                            "endIndex" to endIdx,
+                            "replacement" to replacement,
+                        ),
+                    ),
+                )
+            ) {
+                is ToolResult.Success -> {
+                    appliedCount++
+                    dispatchRes.book?.let { latestBook = it }
+                }
+                is ToolResult.Denied -> lastError = dispatchRes.reason
+                is ToolResult.Error -> lastError = dispatchRes.message
+            }
+        }
+
+        return if (appliedCount > 0) {
+            val updatedText = latestBook.clauses.firstOrNull { it.id == clauseId }?.text
+            VoiceRevisionResult(applied = true, clauseId = clauseId, updatedText = updatedText)
+        } else {
+            VoiceRevisionResult(false, clauseId, null, lastError ?: "未生成有效修改")
         }
     }
 
     private fun buildMessages(
         bookTitle: String,
-        clause: Clause,
+        allClauses: List<Clause>,
+        focusClause: Clause,
         bible: BookBible,
         instruction: String,
     ): List<ChatMessage> {
-        val indexed = clause.text.mapIndexed { i, ch -> "$i:$ch" }.joinToString(" ")
-        val tokens = JiebaWordSegmenter.segment(clause.text)
+        val indexed = focusClause.text.mapIndexed { i, ch -> "$i:$ch" }.joinToString(" ")
+        val tokens = JiebaWordSegmenter.segment(focusClause.text)
             .joinToString(" ") { "[${it.startOffset},${it.endOffset}):${it.word}" }
 
         val sys = """
-            你是儿童绘本的局部语音修改助手。
-            禁止输出任何解释或普通文本，必须直接调用函数工具 `replace_span`，在当前指定句子内做精准局部替换（左闭右开区间 [start_index, end_index)）。
-            请同时提供 `original_span_text`（被替换的原文片段）以确保位置绝对准确。
-            不要重写整句无关部分，也不要修改其他句子。
+            你是儿童绘本的「AI调整」（局部语音修改）助手。
+            禁止输出任何解释或普通文本，必须直接调用一次或多次函数工具 `replace_span` 完成精准修改（左闭右开区间 [start_index, end_index)）。
+            默认优先修改小作者当前选中的焦点句子；但如果小作者明确要求同时修改相邻句子或全书多处（例如“把这几句里的蓝色都改成粉色”），可对对应 `clause_id` 连续多次调用 `replace_span`。
+            每次调用必须提供 `original_span_text`（被替换的原文片段）以确保位置绝对准确，绝不改动无关内容。
         """.trimIndent()
+
+        val focusIdx = allClauses.indexOfFirst { it.id == focusClause.id }.coerceAtLeast(0)
+        val contextWindow = allClauses.subList(
+            (focusIdx - 3).coerceAtLeast(0),
+            (focusIdx + 4).coerceAtMost(allClauses.size),
+        )
 
         val user = buildString {
             appendLine("故事标题: $bookTitle")
             if (bible.protagonistTraits.isNotEmpty()) {
                 appendLine("主角设定: ${bible.protagonistTraits.joinToString("、")}")
             }
-            appendLine("当前句子 ID: ${clause.id}")
-            appendLine("当前句子原文: \"${clause.text}\"")
-            appendLine("字符索引: $indexed")
-            appendLine("Jieba分词边界: $tokens")
+            appendLine("当前句子 ID: ${focusClause.id}")
+            appendLine("当前句子原文: \"${focusClause.text}\"")
+            appendLine("焦点句字符索引: $indexed")
+            appendLine("焦点句分词边界: $tokens")
+            if (contextWindow.size > 1) {
+                appendLine("前后相邻句子（仅当指令明确涉及多句时才修改）:")
+                for (c in contextWindow) {
+                    appendLine("  - [${c.id}] ${c.text}")
+                }
+            }
             appendLine("小作者语音指令: \"$instruction\"")
         }
 

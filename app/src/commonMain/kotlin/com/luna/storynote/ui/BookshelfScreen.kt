@@ -1,6 +1,7 @@
 package com.luna.storynote.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import com.luna.storynote.BookStudioController
 import com.luna.storynote.model.StoryBook
 import com.luna.storynote.model.StudioUiState
+import com.luna.storynote.storage.BookExportMode
 import com.luna.storynote.ui.icons.IconSettingsGear
 import com.luna.storynote.ui.icons.IconWordBoxDeck
 import com.luna.storynote.ui.motion.ModalPaperSheet
@@ -122,24 +125,35 @@ internal fun HardcoverBookshelfScreen(
                         }
                     }
 
-                    Surface(
-                        shape = CircleShape,
-                        color = BookPaper,
-                        border = BorderStroke(1.dp, BookOutline),
-                        shadowElevation = 3.dp,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .testTag("settings_gear")
-                            .semantics { contentDescription = "家长设置" }
-                            .springCombinedPressScale(
-                                pressedScale = 0.90f,
-                                onClick = {},
-                                onLongClick = { controller.openParentSettings() },
-                            ),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            IconSettingsGear(color = InkSecondary, size = 18.dp)
+                    Box {
+                        Surface(
+                            shape = CircleShape,
+                            color = BookPaper,
+                            border = BorderStroke(1.dp, BookOutline),
+                            shadowElevation = 3.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .testTag("settings_gear")
+                                .semantics { contentDescription = "家长设置" }
+                                .springCombinedPressScale(
+                                    pressedScale = 0.90f,
+                                    onClick = {},
+                                    onLongClick = { controller.openParentSettings() },
+                                ),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                IconSettingsGear(color = InkSecondary, size = 18.dp)
+                            }
+                        }
+                        if (uiState.hasAvailableUpdate) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(Vermilion),
+                            )
                         }
                     }
                 }
@@ -179,11 +193,15 @@ internal fun HardcoverBookshelfScreen(
                 color = BookPaper,
                 border = BorderStroke(1.dp, BookOutline),
                 shadowElevation = 12.dp,
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .widthIn(max = 360.dp)
+                    .fillMaxWidth(),
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(22.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
                         text = "《${target.title}》",
@@ -192,42 +210,94 @@ internal fun HardcoverBookshelfScreen(
                         fontWeight = FontWeight.Bold,
                         color = InkPrimary,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(
+                        shape = CircleShape,
+                        color = InkPrimary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(CircleShape)
+                            .springPressScale {
+                                controller.exportBook(target, BookExportMode.FULL_BUNDLE)
+                                bookPendingDelete = null
+                            },
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "导出整本故事包（录音 + 图文）",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BookPaper,
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         Surface(
                             shape = CircleShape,
                             color = BookPaperWarm,
                             border = BorderStroke(1.dp, BookOutline),
                             modifier = Modifier
+                                .weight(1f)
                                 .clip(CircleShape)
                                 .springPressScale {
-                                    controller.env.exportBook(target)
+                                    controller.exportBook(target, BookExportMode.AUDIO_ONLY)
                                     bookPendingDelete = null
                                 },
                         ) {
-                            Text(
-                                text = "导出文稿",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = InkPrimary,
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
-                            )
+                            Box(modifier = Modifier.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "导出完整录音",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = InkPrimary,
+                                )
+                            }
                         }
                         Surface(
                             shape = CircleShape,
-                            color = Vermilion,
+                            color = BookPaperWarm,
+                            border = BorderStroke(1.dp, BookOutline),
                             modifier = Modifier
+                                .weight(1f)
                                 .clip(CircleShape)
                                 .springPressScale {
-                                    controller.deleteBook(target.id)
+                                    controller.exportBook(target, BookExportMode.TEXT_ONLY)
                                     bookPendingDelete = null
                                 },
                         ) {
+                            Box(modifier = Modifier.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "导出文字",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = InkPrimary,
+                                )
+                            }
+                        }
+                    }
+                    Surface(
+                        shape = CircleShape,
+                        color = VermilionSoft,
+                        border = BorderStroke(1.dp, Vermilion.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(CircleShape)
+                            .springPressScale {
+                                controller.deleteBook(target.id)
+                                bookPendingDelete = null
+                            },
+                    ) {
+                        Box(modifier = Modifier.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
                             Text(
                                 text = "移除书本",
-                                fontSize = 14.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp),
+                                color = Vermilion,
                             )
                         }
                     }

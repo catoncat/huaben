@@ -1,7 +1,11 @@
 package com.luna.storynote.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,14 +23,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -42,6 +51,9 @@ import com.luna.storynote.model.MicIntent
 import com.luna.storynote.model.StoryBook
 import com.luna.storynote.model.StudioUiState
 import com.luna.storynote.model.UiMotionEvent
+import com.luna.storynote.ui.icons.IconIllustratePage
+import com.luna.storynote.ui.icons.IconTimeMachine
+import com.luna.storynote.ui.motion.springPressScale
 
 @Composable
 internal fun TwoPageIllustratedSpread(
@@ -54,6 +66,7 @@ internal fun TwoPageIllustratedSpread(
     controller: BookStudioController,
     bookFont: FontFamily,
     topClearance: Dp = 56.dp,
+    onTapPageBlank: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -70,9 +83,14 @@ internal fun TwoPageIllustratedSpread(
                 contentAlignment = Alignment.Center,
             ) {
                 if (illustrationBitmap != null) {
-                    BookIllustrationPanel(
+                    InteractiveIllustrationSlot(
+                        book = book,
                         pageIndex = page.pageIndex,
                         bitmap = illustrationBitmap,
+                        isAiConfigured = uiState.isAiConfigured,
+                        isIllustratingAny = uiState.illustratingPageIndex != null,
+                        onRegenerate = { controller.illustrateCurrentPage() },
+                        onOpenHistory = { controller.openTimeMachine() },
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else if (isIllustrating) {
@@ -114,6 +132,7 @@ internal fun TwoPageIllustratedSpread(
                     isLastPage = isLastPage,
                     topClearance = topClearance,
                     bottomMicClearance = 80.dp,
+                    onTapPageBlank = onTapPageBlank,
                     uiState = uiState,
                     controller = controller,
                     bookFont = bookFont,
@@ -135,6 +154,7 @@ internal fun SingleHardcoverPageSheet(
     controller: BookStudioController,
     bookFont: FontFamily,
     topClearance: Dp = 56.dp,
+    onTapPageBlank: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val maxColumnWidth = if (isLandscapeCentered) 640.dp else 620.dp
@@ -158,6 +178,7 @@ internal fun SingleHardcoverPageSheet(
                 isLastPage = isLastPage,
                 topClearance = topClearance,
                 bottomMicClearance = if (isLandscapeCentered) 80.dp else 86.dp,
+                onTapPageBlank = onTapPageBlank,
                 uiState = uiState,
                 controller = controller,
                 bookFont = bookFont,
@@ -176,6 +197,7 @@ private fun BookPageInterior(
     isLastPage: Boolean,
     topClearance: Dp,
     bottomMicClearance: Dp,
+    onTapPageBlank: () -> Unit,
     uiState: StudioUiState,
     controller: BookStudioController,
     bookFont: FontFamily,
@@ -204,6 +226,7 @@ private fun BookPageInterior(
             ) {
                 val tailId = page.clauseIds.lastOrNull() ?: lastClauseOnBook
                 controller.moveCursorAfter(tailId)
+                onTapPageBlank()
             },
     ) {
         val compactPage = maxWidth < 460.dp
@@ -230,9 +253,14 @@ private fun BookPageInterior(
                     ),
             ) {
                 if (topIllustration != null) {
-                    BookIllustrationPanel(
+                    InteractiveIllustrationSlot(
+                        book = book,
                         pageIndex = page.pageIndex,
                         bitmap = topIllustration,
+                        isAiConfigured = uiState.isAiConfigured,
+                        isIllustratingAny = uiState.illustratingPageIndex != null,
+                        onRegenerate = { controller.illustrateCurrentPage() },
+                        onOpenHistory = { controller.openTimeMachine() },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(illusHeight),
@@ -324,6 +352,94 @@ private fun BookPageInterior(
             }
 
             Spacer(Modifier.height(bottomMicClearance))
+        }
+    }
+}
+
+@Composable
+private fun InteractiveIllustrationSlot(
+    book: StoryBook,
+    pageIndex: Int,
+    bitmap: ImageBitmap,
+    isAiConfigured: Boolean,
+    isIllustratingAny: Boolean,
+    onRegenerate: () -> Unit,
+    onOpenHistory: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showMenu by remember(pageIndex, book.activeIllustrationFor(pageIndex)?.id) { mutableStateOf(false) }
+    val versionCount = remember(book.illustrations, pageIndex) {
+        book.illustrations.count { it.pageIndex == pageIndex }
+    }
+    Box(
+        modifier = modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+        ) {
+            if (isAiConfigured || versionCount > 1) showMenu = !showMenu
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        BookIllustrationPanel(
+            pageIndex = pageIndex,
+            bitmap = bitmap,
+            modifier = Modifier.fillMaxSize(),
+        )
+        AnimatedVisibility(
+            visible = showMenu && (isAiConfigured || versionCount > 1),
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp),
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = BookPaper.copy(alpha = 0.96f),
+                border = BorderStroke(1.dp, BookOutline),
+                shadowElevation = 6.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (isAiConfigured) {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(VermilionSoft)
+                                .springPressScale(enabled = !isIllustratingAny) {
+                                    showMenu = false
+                                    onRegenerate()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconIllustratePage(color = Vermilion, size = 14.dp)
+                            Text("重画这张", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Vermilion)
+                        }
+                    }
+                    if (versionCount > 1) {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(BookPaperWarm)
+                                .springPressScale {
+                                    showMenu = false
+                                    onOpenHistory()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconTimeMachine(color = InkPrimary, size = 14.dp)
+                            Text("历史版本($versionCount)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = InkPrimary)
+                        }
+                    }
+                }
+            }
         }
     }
 }

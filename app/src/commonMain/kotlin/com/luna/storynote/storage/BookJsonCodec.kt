@@ -1,5 +1,6 @@
 package com.luna.storynote.storage
 
+import com.luna.storynote.audio.WavAudioFiles
 import com.luna.storynote.model.AiGatewayConfig
 import com.luna.storynote.model.AudioSpan
 import com.luna.storynote.model.AudioTake
@@ -209,6 +210,8 @@ internal object BookJsonCodec {
             .put("timestamp_ms", s.timestampEpochMs)
             .put("action_label", s.actionLabel)
             .put("tool_name", s.toolName)
+            .put("change_summary", s.changeSummary)
+            .apply { if (!s.focusClauseId.isNullOrBlank()) put("focus_clause_id", s.focusClauseId) }
             .put("clauses", JSONArray().apply { s.clauses.forEach { put(encodeClause(it)) } })
             .put("takes", JSONArray().apply { s.takes.forEach { put(encodeTake(it)) } })
             .put("illustrations", JSONArray().apply { s.illustrations.forEach { put(encodeIllustration(it)) } })
@@ -246,6 +249,8 @@ internal object BookJsonCodec {
             takes = takes,
             illustrations = ills,
             activeIllustrationIds = decodeActiveIllustrations(o.optJSONObject("active_illustrations")),
+            changeSummary = o.optString("change_summary", ""),
+            focusClauseId = o.optString("focus_clause_id", "").takeIf { it.isNotBlank() },
         )
     }
 
@@ -305,6 +310,74 @@ internal object BookJsonCodec {
             .put("active_illustrations", encodeActiveIllustrations(book.activeIllustrationIds))
             .put("created_at_ms", book.createdAtMs)
             .put("updated_at_ms", book.updatedAtMs)
+
+    fun decodeBookV4(obj: JSONObject, folder: File, id: String, num: Int, createdAt: Long, updatedAt: Long): StoryBook {
+        val cArr = obj.optJSONArray("clauses")
+        val clauses = if (cArr != null) {
+            (0 until cArr.length()).mapNotNull { i -> cArr.optJSONObject(i)?.let { decodeClause(it, i) } }
+        } else {
+            emptyList()
+        }
+        val tArr = obj.optJSONArray("takes")
+        val takes = if (tArr != null) {
+            (0 until tArr.length()).mapNotNull { i -> tArr.optJSONObject(i)?.let(::decodeTake) }
+        } else {
+            emptyList()
+        }
+        val iArr = obj.optJSONArray("illustrations")
+        val ills = if (iArr != null) {
+            (0 until iArr.length()).mapNotNull { i -> iArr.optJSONObject(i)?.let(::decodeIllustration) }
+        } else {
+            emptyList()
+        }
+        return StoryBook(
+            id = id,
+            bookNumber = num,
+            title = obj.optString("title", "未命名故事"),
+            titleAudioFileName = obj.optString("title_audio_file", ""),
+            coverColorIndex = obj.optInt("cover_color_index", 0),
+            emblemIndex = obj.optInt("emblem_index", 0),
+            clauses = clauses,
+            takes = takes,
+            illustrations = ills,
+            activeIllustrationIds = decodeActiveIllustrations(obj.optJSONObject("active_illustrations")),
+            createdAtMs = createdAt,
+            updatedAtMs = updatedAt,
+            bookDir = folder,
+        )
+    }
+
+    fun resolveWavDurMs(wavFile: File?, fallbackSec: Double): Long =
+        if (wavFile != null && wavFile.isFile && wavFile.length() > 44L) {
+            WavAudioFiles.wavDurationMs(wavFile).takeIf { it > 0L } ?: (fallbackSec * 1000.0).toLong().coerceAtLeast(0L)
+        } else {
+            (fallbackSec * 1000.0).toLong().coerceAtLeast(0L)
+        }
+
+    fun registerTakeFile(
+        bookFolder: File,
+        existingTakes: List<AudioTake>,
+        takeId: String,
+        wavFile: File?,
+        durationMs: Long,
+    ): List<AudioTake> {
+        if (wavFile == null || !wavFile.isFile || wavFile.length() <= 44L) return existingTakes
+        val takesDir = File(bookFolder, "takes").apply { mkdirs() }
+        val dest = File(takesDir, "$takeId.wav")
+        if (wavFile.absolutePath != dest.absolutePath && !wavFile.renameTo(dest)) {
+            wavFile.copyTo(dest, overwrite = true)
+        }
+        val measuredDur = WavAudioFiles.wavDurationMs(dest).takeIf { it > 0L } ?: durationMs.coerceAtLeast(0L)
+        val rel = "takes/$takeId.wav"
+        val existingIdx = existingTakes.indexOfFirst { it.id == takeId }
+        val newTake = AudioTake(
+            id = takeId,
+            wavFileName = rel,
+            durationMs = measuredDur,
+            createdAtEpochMs = existingTakes.getOrNull(existingIdx)?.createdAtEpochMs ?: System.currentTimeMillis(),
+        )
+        return if (existingIdx >= 0) existingTakes.toMutableList().apply { set(existingIdx, newTake) } else existingTakes + newTake
+    }
 
     fun renderBookMarkdown(book: StoryBook): String {
         val pages = book.paginate()

@@ -1,6 +1,8 @@
 package com.luna.storynote.model
 
 import com.luna.storynote.literacy.WordSpan
+import com.luna.storynote.update.AppUpdateConfig
+import com.luna.storynote.update.AppUpdateState
 import java.net.URI
 
 enum class StudioDestination {
@@ -115,6 +117,8 @@ data class StudioUiState(
     val isVoiceSparkSpeaking: Boolean = false,
     val activeSparkQuestion: String? = null,
     val lastMotionEvent: UiMotionEvent = UiMotionEvent.None,
+    val updateConfig: AppUpdateConfig = AppUpdateConfig(),
+    val updateState: AppUpdateState = AppUpdateState.Idle,
 ) {
     val activeBook: StoryBook?
         get() = books.firstOrNull { it.id == activeBookId }
@@ -124,4 +128,7 @@ data class StudioUiState(
 
     val isAiConfigured: Boolean
         get() = aiConfig.isConfigured
+
+    val hasAvailableUpdate: Boolean
+        get() = updateState is AppUpdateState.Available || updateState is AppUpdateState.ReadyToInstall
 }

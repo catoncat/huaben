@@ -83,6 +83,8 @@ data class TimeMachineSnapshot(
     val takes: List<AudioTake>,
     val illustrations: List<BookIllustration>,
     val activeIllustrationIds: Map<Int, String>,
+    val changeSummary: String = "",
+    val focusClauseId: String? = null,
 )
 
 data class BookBible(

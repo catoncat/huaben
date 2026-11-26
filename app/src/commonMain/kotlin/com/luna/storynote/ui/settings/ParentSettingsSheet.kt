@@ -60,6 +60,9 @@ import com.luna.storynote.ui.icons.IconCloseCross
 import com.luna.storynote.ui.icons.IconEyeVisibility
 import com.luna.storynote.ui.motion.ModalPaperSheet
 import com.luna.storynote.ui.motion.springPressScale
+import com.luna.storynote.update.AppUpdateConfig
+import com.luna.storynote.update.AvailableAppUpdate
+import java.io.File
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -71,6 +74,10 @@ fun ParentSettingsSheet(
     onResetDefaults: () -> Unit,
     onClear: () -> Unit,
     onDismiss: () -> Unit,
+    onCheckUpdate: () -> Unit = {},
+    onDownloadAndInstall: (AvailableAppUpdate) -> Unit = {},
+    onInstallReadyApk: (File) -> Unit = {},
+    onSaveUpdateConfig: (AppUpdateConfig) -> Unit = {},
 ) {
     val cfg = uiState.aiConfig
     var baseUrl by remember { mutableStateOf(cfg.baseUrl) }
@@ -149,6 +156,15 @@ fun ParentSettingsSheet(
                         Box(contentAlignment = Alignment.Center) { IconCloseCross(color = InkSecondary, size = 14.dp) }
                     }
                 }
+
+                ParentUpdateSection(
+                    updateConfig = uiState.updateConfig,
+                    updateState = uiState.updateState,
+                    onCheckUpdate = onCheckUpdate,
+                    onDownloadAndInstall = onDownloadAndInstall,
+                    onInstallReadyApk = onInstallReadyApk,
+                    onSaveUpdateConfig = onSaveUpdateConfig,
+                )
 
                 GatewayTextField(label = "接口地址", value = baseUrl, onValueChange = { baseUrl = it }, placeholder = "https://...")
                 GatewaySecretField(

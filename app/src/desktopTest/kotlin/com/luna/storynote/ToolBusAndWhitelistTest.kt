@@ -206,15 +206,14 @@ class ToolBusAndWhitelistTest {
             assertEquals(false, wb2.data["added"])
             assertEquals(1, repo.listCollectedWords().size)
 
-            // Snapshots recorded with tool names & restore works
+            // Meaningful snapshots recorded with tool names (metadata/gallery no-op tools must NOT spam Time Machine!)
             val snapshots = repo.timeMachine.listSnapshots(book.id)
             val toolNames = snapshots.map { it.toolName }.toSet()
-            assertTrue(toolNames.contains("append_clause"))
-            assertTrue(toolNames.contains("annotate_soft_suggestion"))
+            assertFalse(toolNames.contains("annotate_soft_suggestion"))
+            assertFalse(toolNames.contains("select_page_illustration"))
             assertTrue(toolNames.contains("toggle_paragraph_break"))
             assertTrue(toolNames.contains("replace_span"))
             assertTrue(toolNames.contains("attach_page_illustration"))
-            assertTrue(toolNames.contains("select_page_illustration"))
 
             val beforeRevSnap = snapshots.first { it.toolName == "replace_span" }
             val restoreRes = bus.dispatch(
@@ -340,7 +339,7 @@ class ToolBusAndWhitelistTest {
             }
             assertEquals("小恐龙坐在火山旁。", repo.getBook(book.id)!!.clauses.first().text)
             assertEquals(snapBeforeSpan, repo.timeMachine.listSnapshots(book.id).size)
-            assertTrue(snapCountBefore >= 1)
+            assertEquals(0, snapCountBefore) // First clause into blank book does not create an empty 0-clause noise snapshot
         } finally {
             root.deleteRecursively()
         }

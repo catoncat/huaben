@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import com.luna.storynote.model.AiGatewayConfig
 import com.luna.storynote.model.StoryBook
+import com.luna.storynote.storage.BookExportMode
 import java.io.File
 import java.io.InputStream
 
@@ -34,9 +35,13 @@ interface PlatformEnvironment {
     fun speakStandardWord(word: String)
     fun stopSpeaking()
     fun loadDefaultAiConfig(): AiGatewayConfig
+    fun loadDefaultGithubToken(): String = ""
     fun openStrokeAssetStream(): InputStream?
     fun setKeepScreenAwake(keepAwake: Boolean)
-    fun exportBook(book: StoryBook)
+    fun exportBook(book: StoryBook) = exportBook(book, BookExportMode.FULL_BUNDLE).let {}
+    fun exportBook(book: StoryBook, mode: BookExportMode): String = ""
+    fun installUpdateApk(apkFile: File): String? = null
+    fun openExternalUrl(url: String) = Unit
 }
 
 @Composable

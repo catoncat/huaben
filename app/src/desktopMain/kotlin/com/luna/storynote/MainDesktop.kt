@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -22,12 +24,20 @@ import com.luna.storynote.ui.StoryStudioRoot
 import org.jetbrains.skia.Canvas
 import org.jetbrains.skia.Color as SkColor
 import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image as SkiaImage
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Path as SkPath
 import org.jetbrains.skia.Shader
 import org.jetbrains.skia.Surface
 import java.io.File
 import kotlin.io.path.createTempDirectory
+
+private fun loadDesktopWindowIcon(): BitmapPainter? = try {
+    val bytes = DesktopPlatformEnvironment::class.java.getResourceAsStream("/app_icon.png")?.use { it.readBytes() }
+    bytes?.let { BitmapPainter(SkiaImage.makeFromEncoded(it).toComposeImageBitmap()) }
+} catch (_: Throwable) {
+    null
+}
 
 fun main(args: Array<String>) {
     val magpieIdx = args.indexOf("--verify-magpie")
@@ -47,6 +57,7 @@ fun main(args: Array<String>) {
 
     application {
         val windowState = rememberWindowState(size = DpSize(1140.dp, 780.dp))
+        val windowIcon = loadDesktopWindowIcon()
         Window(
             onCloseRequest = {
                 controller.dispose()
@@ -54,6 +65,7 @@ fun main(args: Array<String>) {
             },
             state = windowState,
             title = "小作家故事本",
+            icon = windowIcon,
         ) {
             val uiState by controller.uiState.collectAsState()
             MaterialTheme {
