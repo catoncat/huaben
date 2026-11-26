@@ -1,0 +1,5 @@
+{
+  "setup": ["./.paradev/setup.sh"],
+  "teardown": ["rm -rf .gradle build app/build dist local.properties"],
+  "run": ["./run-local.sh"]
+}
