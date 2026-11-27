@@ -38,7 +38,41 @@
     el.textContent = text;
     el.classList.add('is-visible');
     clearTimeout(showToast._timer);
-    showToast._timer = setTimeout(() => el.classList.remove('is-visible'), 2200);
+    showToast._timer = setTimeout(() => el.classList.remove('is-visible'), 2000);
+  }
+
+  function initQrPopovers() {
+    const wraps = Array.from(document.querySelectorAll('[data-qr-wrap]'));
+    if (!wraps.length) return;
+    wraps.forEach((wrap) => {
+      const trigger = wrap.querySelector('[data-qr-trigger]');
+      if (!trigger) return;
+      trigger.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const willOpen = !wrap.classList.contains('is-open');
+        wraps.forEach((w) => w.classList.remove('is-open'));
+        if (willOpen) wrap.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', String(willOpen));
+      });
+    });
+    document.addEventListener('click', (ev) => {
+      wraps.forEach((w) => {
+        if (!w.contains(ev.target)) {
+          w.classList.remove('is-open');
+          const t = w.querySelector('[data-qr-trigger]');
+          if (t) t.setAttribute('aria-expanded', 'false');
+        }
+      });
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') {
+        wraps.forEach((w) => {
+          w.classList.remove('is-open');
+          const t = w.querySelector('[data-qr-trigger]');
+          if (t) t.setAttribute('aria-expanded', 'false');
+        });
+      }
+    });
   }
 
   function initFooterSpotlight() {
@@ -57,99 +91,38 @@
     });
   }
 
-  function initShotTabs() {
-    const frame = document.querySelector('[data-shot-frame]');
+  function initShotGallery() {
     const img = document.querySelector('[data-shot-img]');
     const caption = document.querySelector('[data-shot-caption]');
-    const tabs = document.querySelectorAll('[data-shot-tab]');
-    if (!frame || !img || !tabs.length) return;
+    const countEl = document.querySelector('[data-shot-count]');
+    const tabs = Array.from(document.querySelectorAll('[data-shot-tab]'));
+    if (!img || !tabs.length) return;
 
-    tabs.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        tabs.forEach((b) => {
-          b.classList.remove('is-active');
-          b.setAttribute('aria-selected', 'false');
-        });
-        btn.classList.add('is-active');
-        btn.setAttribute('aria-selected', 'true');
-        img.src = btn.dataset.src;
-        img.alt = btn.dataset.alt || '';
-        if (caption) caption.textContent = btn.dataset.caption || '';
-        const isPhone = btn.dataset.ratio === 'phone';
-        frame.classList.toggle('is-phone', isPhone);
-        frame.classList.toggle('is-wide', !isPhone);
+    let activeIdx = 0;
+
+    function selectIdx(idx) {
+      activeIdx = (idx + tabs.length) % tabs.length;
+      const btn = tabs[activeIdx];
+      tabs.forEach((b, i) => {
+        b.classList.toggle('is-active', i === activeIdx);
+        b.setAttribute('aria-selected', String(i === activeIdx));
       });
-    });
-  }
-
-  function initStorybookDemo() {
-    const chips = document.querySelectorAll('[data-word-key]');
-    const boxes = document.querySelector('[data-tianzi-boxes]');
-    const pyEl = document.querySelector('[data-tianzi-py]');
-    const noteEl = document.querySelector('[data-tianzi-note]');
-    const speakBtn = document.querySelector('[data-tianzi-speak]');
-    if (!chips.length || !boxes) return;
-
-    const WORDS = {
-      dino: {
-        chars: ['小', '恐', '龙'],
-        pinyin: 'xiǎo · kǒng · lóng',
-        note: '收进字词盒，随时回听原声。',
-        text: '小恐龙',
-      },
-      slowly: {
-        chars: ['慢', '慢', '地'],
-        pinyin: 'màn · màn · de',
-        note: '识别成「的」时，轻点一下就能换「地」。',
-        text: '慢慢地',
-      },
-      room: {
-        chars: ['房', '间'],
-        pinyin: 'fáng · jiān',
-        note: '按词切分，不把词拆碎。',
-        text: '房间',
-      },
-      forest: {
-        chars: ['大', '森', '林'],
-        pinyin: 'dà · sēn · lín',
-        note: '看笔顺、换同音字，改错随时撤回。',
-        text: '大森林',
-      },
-    };
-
-    let activeText = WORDS.dino.text;
-
-    function selectWord(key) {
-      const item = WORDS[key] || WORDS.dino;
-      activeText = item.text;
-      chips.forEach((c) => c.classList.toggle('is-active', c.dataset.wordKey === key));
-      boxes.innerHTML = item.chars
-        .map((ch) => `<div class="tianzi-cell"><span>${ch}</span></div>`)
-        .join('');
-      if (pyEl) pyEl.textContent = item.pinyin;
-      if (noteEl) noteEl.textContent = item.note;
+      img.src = btn.dataset.src;
+      img.alt = btn.dataset.alt || '';
+      if (caption) caption.textContent = btn.dataset.caption || '';
+      if (countEl) countEl.textContent = `${activeIdx + 1} / ${tabs.length}`;
     }
 
-    chips.forEach((chip) => {
-      chip.addEventListener('click', () => selectWord(chip.dataset.wordKey));
+    tabs.forEach((btn, idx) => {
+      btn.addEventListener('click', () => selectIdx(idx));
     });
 
-    if (speakBtn) {
-      speakBtn.addEventListener('click', () => {
-        if ('speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          const u = new SpeechSynthesisUtterance(activeText);
-          u.lang = 'zh-CN';
-          u.rate = 0.92;
-          window.speechSynthesis.speak(u);
-          showToast(`正在朗读「${activeText}」`);
-        } else {
-          showToast('当前浏览器不支持语音合成');
-        }
-      });
-    }
+    const prevBtn = document.querySelector('[data-shot-prev]');
+    const nextBtn = document.querySelector('[data-shot-next]');
+    if (prevBtn) prevBtn.addEventListener('click', () => selectIdx(activeIdx - 1));
+    if (nextBtn) nextBtn.addEventListener('click', () => selectIdx(activeIdx + 1));
 
-    selectWord('dino');
+    selectIdx(0);
   }
 
   function initReleaseHydration() {
@@ -165,16 +138,12 @@
         document.querySelectorAll('[data-release-size]').forEach((el) => {
           el.textContent = data.sizeLabel || '';
         });
-        document.querySelectorAll('[data-release-sha]').forEach((el) => {
-          el.textContent = data.sha256 ? data.sha256.slice(0, 16) + '…' : '';
-        });
         document.querySelectorAll('[data-release-apk]').forEach((el) => {
-          el.setAttribute('href', data.apkUrl);
+          el.setAttribute('href', data.latestApkUrl || data.apkUrl);
         });
-        const list = document.querySelector('[data-release-notes]');
-        if (list && Array.isArray(data.releaseNotes) && data.releaseNotes.length) {
-          list.innerHTML = data.releaseNotes.map((n) => `<li>${n}</li>`).join('');
-        }
+        document.querySelectorAll('[data-release-copy]').forEach((el) => {
+          el.dataset.copyText = data.apkUrl;
+        });
       })
       .catch(() => {});
   }
@@ -195,9 +164,9 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     initThemeToggle();
+    initQrPopovers();
     initFooterSpotlight();
-    initShotTabs();
-    initStorybookDemo();
+    initShotGallery();
     initReleaseHydration();
     initCopyButtons();
   });

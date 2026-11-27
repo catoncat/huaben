@@ -25,6 +25,7 @@ fun StoryStudioRoot(
     uiState: StudioUiState,
     controller: BookStudioController,
     modifier: Modifier = Modifier,
+    initialFlippedWords: Set<String> = emptySet(),
 ) {
     val bookFont = rememberPlatformBookFontFamily()
     val rootBackground = if (uiState.destination == StudioDestination.BOOK) BookPaper else DeskSurface
@@ -61,6 +62,7 @@ fun StoryStudioRoot(
                     uiState = uiState,
                     controller = controller,
                     bookFont = bookFont,
+                    initialFlippedWords = initialFlippedWords,
                 )
             }
         }

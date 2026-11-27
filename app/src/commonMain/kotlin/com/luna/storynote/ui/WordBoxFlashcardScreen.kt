@@ -56,8 +56,13 @@ internal fun WordBoxFlashcardScreen(
     uiState: StudioUiState,
     controller: BookStudioController,
     bookFont: FontFamily,
+    initialFlippedWords: Set<String> = emptySet(),
 ) {
-    val flippedMap = remember { mutableStateMapOf<String, Boolean>() }
+    val flippedMap = remember(initialFlippedWords) {
+        mutableStateMapOf<String, Boolean>().apply {
+            initialFlippedWords.forEach { put(it, true) }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -124,6 +129,7 @@ internal fun WordBoxFlashcardScreen(
                     FlippableWordCard(
                         card = card,
                         isFlipped = isFlipped,
+                        initialFlipped = card.word in initialFlippedWords,
                         bookFont = bookFont,
                         onFlip = {
                             val next = !isFlipped
@@ -145,31 +151,34 @@ internal fun WordBoxFlashcardScreen(
 private fun FlippableWordCard(
     card: CollectedWordCard,
     isFlipped: Boolean,
+    initialFlipped: Boolean = false,
     bookFont: FontFamily,
     onFlip: () -> Unit,
 ) {
+    val isInstantFlipped = isFlipped && initialFlipped
     val rotY by animateFloatAsState(
         targetValue = if (isFlipped) 180f else 0f,
         animationSpec = spring(dampingRatio = 0.76f, stiffness = 340f),
         label = "cardFlip",
     )
+    val effectiveRotY = if (isInstantFlipped) 180f else rotY
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .height(210.dp)
             .graphicsLayer {
-                rotationY = rotY
+                rotationY = effectiveRotY
                 cameraDistance = 14f * density
             }
             .clip(RoundedCornerShape(22.dp))
             .springPressScale(pressedScale = 0.96f, onClick = onFlip),
         shape = RoundedCornerShape(22.dp),
-        color = if (rotY <= 90f) BookPaper else BookPaperWarm,
-        border = BorderStroke(1.5.dp, if (rotY <= 90f) BookOutline else JadeInk.copy(alpha = 0.5f)),
+        color = if (effectiveRotY <= 90f) BookPaper else BookPaperWarm,
+        border = BorderStroke(1.5.dp, if (effectiveRotY <= 90f) BookOutline else JadeInk.copy(alpha = 0.5f)),
         shadowElevation = 5.dp,
     ) {
-        if (rotY <= 90f) {
+        if (effectiveRotY <= 90f) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = card.word,

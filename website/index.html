@@ -25,7 +25,6 @@
         <span class="brand-name">m0m<span class="muted">.app</span></span>
       </a>
       <nav class="nav-actions" aria-label="主导航">
-        <a class="nav-btn" href="#apps">产品</a>
         <a class="nav-btn" href="./huaben/">话本本</a>
         <button type="button" class="nav-btn nav-btn-icon" data-theme-toggle aria-label="切换亮色或暗色主题" aria-pressed="false">
           <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
@@ -57,7 +56,7 @@
         </article>
       </section>
 
-      <section id="apps" class="band" aria-label="产品列表">
+      <section id="apps" class="band" aria-label="产品">
         <div class="app-row">
           <img class="app-icon" src="./assets/app-icon.png" alt="话本本应用图标" width="56" height="56" />
           <div class="app-row-body">
@@ -66,16 +65,25 @@
               <span class="tag">儿童语音绘本</span>
               <span class="tag tag-brand mono" data-release-version>v1.2.0</span>
             </div>
-            <p class="app-row-desc">孩子开口讲故事，手机当场变成带拼音的有声绘本。支持 Android 与 macOS。</p>
+            <p class="app-row-desc">孩子开口讲故事，平板和手机当场变成带拼音的有声绘本。支持 Android 与 macOS。</p>
             <div class="app-row-actions">
               <a class="btn btn-sm btn-muted" href="./huaben/">
                 <span>官网</span>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
               </a>
-              <a class="btn btn-sm btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.2.0.apk">
+              <a class="btn btn-sm btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 <span>下载 APK</span>
               </a>
+              <div class="qr-popover-wrap" data-qr-wrap>
+                <button type="button" class="btn btn-sm btn-outline" data-qr-trigger aria-expanded="false">扫码安装</button>
+                <div class="qr-popover" role="dialog" aria-label="扫码下载二维码">
+                  <div class="qr-popover-box">
+                    <img src="./assets/qr-apk.png" alt="扫码下载话本本 APK" width="128" height="128" />
+                  </div>
+                  <p class="qr-popover-hint">手机扫码直连下载 APK</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -119,7 +127,6 @@
       <span>© 2026 m0m.app</span>
       <div class="footer-links">
         <a href="./huaben/">话本本</a>
-        <a href="./huaben/#download">下载</a>
       </div>
     </footer>
   </div>

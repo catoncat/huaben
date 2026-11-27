@@ -552,3 +552,62 @@ html.dark .icon-moon { display: none; }
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* Hover / click floating QR popover (display:none when closed to prevent mobile viewport spill) */
+.qr-popover-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.qr-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: 184px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 36px -14px rgba(0, 0, 0, 0.28);
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+@media (min-width: 640px) {
+  .qr-popover {
+    left: 0;
+    right: auto;
+  }
+}
+
+.qr-popover-wrap:hover .qr-popover,
+.qr-popover-wrap:focus-within .qr-popover,
+.qr-popover-wrap.is-open .qr-popover {
+  display: flex;
+}
+
+.qr-popover-box {
+  width: 144px;
+  height: 144px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+}
+
+.qr-popover-box img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.qr-popover-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-fg);
+  line-height: 1.4;
+}

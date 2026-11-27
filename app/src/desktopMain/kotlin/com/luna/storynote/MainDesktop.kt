@@ -47,7 +47,9 @@ fun main(args: Array<String>) {
     }
     val idx = args.indexOf("--render-preview")
     if (idx >= 0 && idx + 1 < args.size) {
-        renderVerificationSuite(File(args[idx + 1]))
+        val sampleArtIdx = args.indexOf("--sample-art")
+        val sampleArtFile = if (sampleArtIdx >= 0 && sampleArtIdx + 1 < args.size) File(args[sampleArtIdx + 1]) else null
+        renderVerificationSuite(File(args[idx + 1]), sampleArtFile)
         return
     }
 
@@ -146,7 +148,7 @@ private fun createSampleWatercolorPng(targetFile: File, width: Int = 720, height
     surface.close()
 }
 
-private fun renderVerificationSuite(outDir: File) {
+private fun renderVerificationSuite(outDir: File, sampleArtFile: File? = null) {
     outDir.mkdirs()
     val tmp = createTempDirectory("studio-m3-shots-").toFile()
     try {
@@ -161,10 +163,14 @@ private fun renderVerificationSuite(outDir: File) {
         repo.insertSentenceClip(plainBook.id, null, "清晨的露珠挂在叶子上，小鸟在枝头唱起了歌。", tempWavFile = null, durationSec = 0.0)
         repo.updateBookTitleAndCover(plainBook.id, newTitle = "森林清晨", coverColorIndex = 1, emblemIndex = 3)
 
-        // Seed sample watercolor illustration & SoftAnnotation & TimeMachineSnapshot on illustratedBook
+        // Seed watercolor illustration & SoftAnnotation & TimeMachineSnapshot on illustratedBook
         val illuFile = File(tmp, "sample_watercolor.png")
-        createSampleWatercolorPng(illuFile)
-        repo.attachIllustration(illustratedBook.id, 0, illuFile, "warm watercolor dinosaur marshmallow volcano")
+        if (sampleArtFile != null && sampleArtFile.isFile) {
+            sampleArtFile.copyTo(illuFile, overwrite = true)
+        } else {
+            createSampleWatercolorPng(illuFile)
+        }
+        repo.attachIllustration(illustratedBook.id, 0, illuFile, "warm watercolor dinosaur forest fox starry map")
         val targetClause = illustratedBook.clauses.first()
         repo.annotateClauseSoftSuggestions(
             illustratedBook.id,
@@ -182,6 +188,12 @@ private fun renderVerificationSuite(outDir: File) {
         val words = repo.listCollectedWords()
         val updatedSnaps = repo.timeMachine.listSnapshots(mainBook.id)
 
+        val previewAiCfg = com.luna.storynote.model.AiGatewayConfig(
+            baseUrl = "https://example.invalid/v1",
+            apiKey = "sk-preview",
+            textModel = "preview-model",
+            imageModel = "preview-image",
+        )
         val cleanLandscapeState = StudioUiState(
             destination = StudioDestination.BOOK,
             books = books,
@@ -189,9 +201,14 @@ private fun renderVerificationSuite(outDir: File) {
             currentPageIndex = 0,
             collectedWords = words,
             timeMachineSnapshots = updatedSnaps,
+            aiConfig = previewAiCfg,
         )
         renderShot(File(outDir, "01-landscape-spread.png"), 960, 600) {
             MaterialTheme { StoryStudioRoot(cleanLandscapeState, controller) }
+        }
+        val shelfLandscapeState = StudioUiState(destination = StudioDestination.SHELF, books = books, collectedWords = words)
+        renderShot(File(outDir, "14-landscape-bookshelf.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(shelfLandscapeState, controller) }
         }
         val phoneReaderState = StudioUiState(
             destination = StudioDestination.BOOK,
@@ -267,13 +284,36 @@ private fun renderVerificationSuite(outDir: File) {
         renderShot(File(outDir, "09-parent-settings-sheet.png"), 560, 900) {
             MaterialTheme { StoryStudioRoot(settingsState, controller) }
         }
+        val foxClause = mainBook.clauses.firstOrNull { it.text.contains("小狐狸") } ?: mainBook.clauses.last()
+        val candyClause = mainBook.clauses.firstOrNull { it.text.contains("棉花糖") } ?: mainBook.clauses.last()
+        val caveClause = mainBook.clauses.firstOrNull { it.text.contains("山洞") } ?: mainBook.clauses.last()
+        repo.addWordBoxCard("小狐狸", listOf("xiǎo", "hú", "li"), mainBook, foxClause)
+        repo.addWordBoxCard("星星地图", listOf("xīng", "xīng", "dì", "tú"), mainBook, foxClause)
+        repo.addWordBoxCard("棉花糖", listOf("mián", "huā", "táng"), mainBook, candyClause)
+        repo.addWordBoxCard("温暖", listOf("wēn", "nuǎn"), mainBook, caveClause)
+        val richWords = repo.listCollectedWords()
         val wordBoxState = StudioUiState(
             destination = StudioDestination.WORD_BOX,
             books = books,
-            collectedWords = words,
+            collectedWords = richWords,
         )
         renderShot(File(outDir, "10-word-box.png"), 960, 600) {
-            MaterialTheme { StoryStudioRoot(wordBoxState, controller) }
+            MaterialTheme {
+                StoryStudioRoot(
+                    wordBoxState,
+                    controller,
+                    initialFlippedWords = setOf("小恐龙", "星星地图"),
+                )
+            }
+        }
+        val recordingLandscapeState = cleanLandscapeState.copy(
+            cursorAfterClauseId = mainBook.clauses.getOrNull(1)?.id,
+            activeMicIntent = MicIntent.WriteAtCursor,
+            liveDraftText = "突然，一只聪明的小狐狸拿着星星地图跳了出来",
+            voiceEnergy = 0.72f,
+        )
+        renderShot(File(outDir, "15-landscape-recording.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(recordingLandscapeState, controller) }
         }
         val editorState = cleanLandscapeState.copy(isFullTextEditorOpen = true)
         renderShot(File(outDir, "11-full-text-editor-landscape.png"), 960, 600) {

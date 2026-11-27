@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>话本本 — 开口讲故事，不用打字成绘本 · m0m.app</title>
-  <meta name="description" content="孩子开口讲故事，手机当场变成带拼音的有声绘本。留住原声、点字识字、随时导出。" />
+  <meta name="description" content="孩子开口讲故事，平板与手机当场变成带拼音的有声绘本。留住原声、点字识字、随时导出。" />
   <meta name="theme-color" content="#fafafa" />
   <link rel="icon" type="image/png" href="../assets/favicon.png" />
   <script>
@@ -31,8 +31,7 @@
       </div>
       <nav class="nav-actions" aria-label="产品页导航">
         <a class="nav-btn hide-mobile" href="#preview">界面</a>
-        <a class="nav-btn hide-mobile" href="#try">试玩</a>
-        <a class="nav-btn" href="#download">下载</a>
+        <a class="nav-btn" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk">下载</a>
         <button type="button" class="nav-btn nav-btn-icon" data-theme-toggle aria-label="切换亮色或暗色主题" aria-pressed="false">
           <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
           <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
@@ -44,86 +43,97 @@
       <section class="hero band">
         <div class="app-row-head" style="margin-bottom: 18px;">
           <span class="tag tag-brand mono" data-release-version>v1.2.0</span>
-          <span class="tag">Android · macOS</span>
+          <span class="tag">Android 平板 / 手机 · macOS</span>
         </div>
         <h1 class="hero-display">
           <span class="hero-line">开口讲出<span class="hero-emphasis">故事</span></span>
           <span class="hero-line">不用<del class="hero-strike">打字</del>成绘本</span>
         </h1>
-        <p class="hero-sub">按住说一句，纸页上长出拼音、留住童声，还能配插画。</p>
+        <p class="hero-sub">按住说一句，纸页上长出拼音、留住童声，还能配水彩插画。</p>
         <div class="hero-cta-row">
-          <a class="btn btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.2.0.apk">
+          <a class="btn btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
             <span>下载 Android APK</span>
             <span class="mono" style="opacity: 0.72; font-size: 12px;" data-release-size>16.8 MB</span>
           </a>
-          <a class="btn btn-muted" href="#download">扫码安装</a>
+
+          <div class="qr-popover-wrap" data-qr-wrap>
+            <button type="button" class="btn btn-muted" data-qr-trigger aria-expanded="false">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+              <span>扫码安装</span>
+            </button>
+            <div class="qr-popover" role="dialog" aria-label="扫码下载二维码">
+              <div class="qr-popover-box">
+                <img src="../assets/qr-apk.png" alt="扫码下载话本本 APK" width="128" height="128" />
+              </div>
+              <p class="qr-popover-hint">手机扫码直下最新版<br />国内通道 · 免登录</p>
+              <button type="button" class="btn btn-sm btn-outline" style="width: 100%;" data-copy-text="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk" data-copy-toast="已复制最新 APK 链接">复制直链</button>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id="preview" class="band" aria-label="真实界面">
+      <section id="preview" class="band" aria-label="平板横屏界面与完整流程">
         <div class="stage-head">
-          <span class="stage-label">界面</span>
-          <div class="tab-group" role="tablist" aria-label="切换界面">
+          <span class="stage-label">从开口到成书</span>
+          <div class="tab-group" role="tablist" aria-label="按使用顺序切换画面">
             <button type="button" class="tab-btn is-active" role="tab" aria-selected="true"
-              data-shot-tab data-ratio="phone"
-              data-src="../assets/shot-phone-reader.webp"
-              data-alt="手机阅读页"
-              data-caption="点空白呼出顶栏，整页留给故事。">手机阅读</button>
+              data-shot-tab
+              data-src="../assets/shot-recording.webp"
+              data-alt="按住录音边说边出字"
+              data-caption="1. 开口录音：按住麦克风讲故事，文字和拼音跟着声音实时落到纸页上。">开口录音</button>
             <button type="button" class="tab-btn" role="tab" aria-selected="false"
-              data-shot-tab data-ratio="wide"
-              data-src="../assets/shot-tablet-spread.webp"
-              data-alt="平板双页"
-              data-caption="左图右文，像翻一本真绘本。">双页摊开</button>
+              data-shot-tab
+              data-src="../assets/shot-spread.webp"
+              data-alt="平板横屏双页绘本"
+              data-caption="2. 双页阅读：左水彩插画、右拼音正文，顶栏一键连播朗读或找续写灵感。">双页阅读</button>
             <button type="button" class="tab-btn" role="tab" aria-selected="false"
-              data-shot-tab data-ratio="wide"
+              data-shot-tab
               data-src="../assets/shot-tianzige.webp"
-              data-alt="田字格识字"
-              data-caption="点词看拼音与笔顺，顺手换同音字。">田字格</button>
+              data-alt="田字格识字与换字"
+              data-caption="3. 点词识字：点任意词弹出田字格，看拼音笔顺、换同音字或收进字词盒。">点词识字</button>
             <button type="button" class="tab-btn" role="tab" aria-selected="false"
-              data-shot-tab data-ratio="wide"
+              data-shot-tab
+              data-src="../assets/shot-clause-actions.webp"
+              data-alt="点击单句弹出修改栏"
+              data-caption="4. 句子修改：点一句随时播原声、重说、插句、语音「AI调整」或删句。">句子修改</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab
+              data-src="../assets/shot-editor.webp"
+              data-alt="家长全文校对模式"
+              data-caption="5. 全文校对：长按「校对」进整本编辑，保存自动对齐孩子原声。">全文校对</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab
               data-src="../assets/shot-time-machine.webp"
-              data-alt="时光机"
-              data-caption="每步修改都留档，随时回到刚才。">时光机</button>
+              data-alt="时光机版本回溯"
+              data-caption="6. 时光机：每次修改自动留档，能回听旧录音，一键回到刚才。">时光机</button>
             <button type="button" class="tab-btn" role="tab" aria-selected="false"
-              data-shot-tab data-ratio="phone"
-              data-src="../assets/shot-phone-bookshelf.webp"
-              data-alt="书架"
-              data-caption="长按书本，导出完整录音与绘本。">书架</button>
+              data-shot-tab
+              data-src="../assets/shot-word-box.webp"
+              data-alt="字词盒翻转卡片复习"
+              data-caption="7. 字词盒：正面考认读，点开翻面看拼音并回放孩子自己的原声例句。">字词盒</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab
+              data-src="../assets/shot-bookshelf.webp"
+              data-alt="故事书架与整本导出"
+              data-caption="8. 故事书架：长按任意绘本，一键导出完整拼接录音与可打印图文包。">故事书架</button>
           </div>
         </div>
         <div class="stage-canvas">
-          <div class="shot-frame is-phone" data-shot-frame>
-            <img data-shot-img src="../assets/shot-phone-reader.webp" alt="手机阅读页" />
+          <div class="shot-frame">
+            <img data-shot-img src="../assets/shot-recording.webp" alt="按住录音边说边出字" />
           </div>
-          <p class="stage-caption" data-shot-caption>点空白呼出顶栏，整页留给故事。</p>
-        </div>
-      </section>
-
-      <section id="try" class="band" aria-label="田字格试玩">
-        <div class="stage-head">
-          <span class="stage-label">点一点词，试试田字格</span>
-          <span class="tag">试玩</span>
-        </div>
-        <div class="demo-wrap">
-          <p class="demo-sentence">
-            <button type="button" class="word-chip is-active" data-word-key="dino"><ruby>小<rt>xiǎo</rt>恐<rt>kǒng</rt>龙<rt>lóng</rt></ruby></button>
-            <button type="button" class="word-chip" data-word-key="slowly"><ruby>慢<rt>màn</rt>慢<rt>màn</rt>地<rt>de</rt></ruby></button>
-            <ruby>走<rt>zǒu</rt>出<rt>chū</rt>了<rt>le</rt></ruby>
-            <button type="button" class="word-chip" data-word-key="room"><ruby>房<rt>fáng</rt>间<rt>jiān</rt></ruby></button>，
-            <ruby>终<rt>zhōng</rt>于<rt>yú</rt>来<rt>lái</rt>到<rt>dào</rt>了<rt>le</rt></ruby>
-            <button type="button" class="word-chip" data-word-key="forest"><ruby>大<rt>dà</rt>森<rt>sēn</rt>林<rt>lín</rt></ruby></button>。
-          </p>
-          <div class="tianzi-card">
-            <div class="tianzi-top">
-              <span class="tianzi-py mono" data-tianzi-py>xiǎo · kǒng · lóng</span>
-              <button type="button" class="btn btn-sm btn-muted" data-tianzi-speak>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                <span>读一下</span>
+          <div class="stage-foot">
+            <p class="stage-caption" data-shot-caption>1. 开口录音：按住麦克风讲故事，文字和拼音跟着声音实时落到纸页上。</p>
+            <div class="stage-pager">
+              <button type="button" class="pager-btn" data-shot-prev aria-label="上一张">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <span class="pager-count mono" data-shot-count>1 / 8</span>
+              <button type="button" class="pager-btn" data-shot-next aria-label="下一张">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
               </button>
             </div>
-            <div class="tianzi-boxes" data-tianzi-boxes></div>
-            <p class="tianzi-note" data-tianzi-note>收进字词盒，随时回听原声。</p>
           </div>
         </div>
       </section>
@@ -135,37 +145,12 @@
         </article>
         <article class="cell">
           <h2 class="cell-title">改错不怕</h2>
-          <p class="cell-body">语音改词、换字、配插画，所有版本进时光机随时撤回。</p>
+          <p class="cell-body">语音改词、换字、配插画，每一步进时光机随时撤回。</p>
         </article>
         <article class="cell">
           <h2 class="cell-title">本地零打扰</h2>
-          <p class="cell-body">不强制登录、无广告，AI 接口由家长在设置里掌控。</p>
+          <p class="cell-body">无广告不强制登录，AI 接口由家长掌控，支持应用内更新。</p>
         </article>
-      </section>
-
-      <section id="download" class="download-band band" aria-label="下载">
-        <div class="download-main">
-          <div class="app-row-head">
-            <h2 class="app-row-title">下载话本本</h2>
-            <span class="tag tag-brand mono" data-release-version>v1.2.0</span>
-            <span class="tag mono" data-release-size>16.8 MB</span>
-          </div>
-          <p class="cell-body">Android 8.0 及以上手机和平板可用。国内直连下载，装好后支持应用内自动检查更新。</p>
-          <div class="app-row-actions" style="margin-top: 18px;">
-            <a class="btn btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.2.0.apk">
-              <span>下载 Android APK</span>
-            </a>
-            <button type="button" class="btn btn-outline" data-copy-text="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.2.0.apk" data-copy-toast="已复制下载链接">
-              <span>复制链接</span>
-            </button>
-          </div>
-        </div>
-        <div class="download-qr">
-          <div class="qr-frame">
-            <img src="../assets/qr-apk.png" alt="扫码下载话本本 APK" width="128" height="128" />
-          </div>
-          <span class="cell-body" style="font-size: 12.5px;">手机扫码直下</span>
-        </div>
       </section>
     </main>
 
@@ -205,7 +190,6 @@
       <span>© 2026 话本本 · m0m.app</span>
       <div class="footer-links">
         <a href="../">返回 m0m.app</a>
-        <a href="#download">下载</a>
       </div>
     </footer>
   </div>
