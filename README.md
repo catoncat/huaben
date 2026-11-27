@@ -4,9 +4,9 @@
   <p><strong>开口讲出故事，不用打字成绘本。</strong></p>
   <p>按住说一句，纸页上长出拼音、留住童声，还能配水彩插画。</p>
   <p>
-    <a href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk"><strong>下载 Android APK（国内直连）</strong></a>
+    <a href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/huaben-latest.apk"><strong>下载 Android APK（国内直连）</strong></a>
     &nbsp;·&nbsp;
-    <a href="https://github.com/catoncat/story-note/releases">更新记录</a>
+    <a href="https://github.com/catoncat/huaben/releases">更新记录</a>
   </p>
 </div>
 
@@ -49,8 +49,8 @@
 
 支持 **Android 8.0 及以上平板与手机**（装好后支持在家长设置里一键检查并覆盖更新）。
 
-- **国内直连最新版**：[StoryNote-latest.apk](https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk)
-- **历史版本与校验值**：[GitHub Releases](https://github.com/catoncat/story-note/releases)
+- **国内直连最新版**：[huaben-latest.apk](https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/huaben-latest.apk)
+- **历史版本与校验值**：[GitHub Releases](https://github.com/catoncat/huaben/releases)
 
 <p>
   <img src="website/assets/qr-apk.png" alt="手机扫码直接下载话本本 APK" width="140" />

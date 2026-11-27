@@ -64,7 +64,7 @@ fun main(args: Array<String>) {
                 exitApplication()
             },
             state = windowState,
-            title = "小作家故事本",
+            title = "话本本",
             icon = windowIcon,
         ) {
             val uiState by controller.uiState.collectAsState()

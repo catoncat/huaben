@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Publish StoryNote Android APK + latest.json to the public domestic CNB release channel
+# Publish 话本本 (Huaben) Android APK + latest.json to the public domestic CNB release channel
 # (https://cnb.cool/lzb-prod/story-note-releases) without storing or logging any secrets.
 #
 # Uses a single-commit squashed `main` branch in the dedicated distribution repo so:
 # - Repo size stays bounded (~17MB) across unlimited releases
-# - Both `apk/StoryNote-v<ver>.apk` and stable alias `apk/StoryNote-latest.apk` share the exact
-#   same Git blob (0 extra upload bytes), so QR codes & static links never break across releases
-# - Integrity is verified in ~0.2s via HTTP HEAD ETag (Git blob SHA-1) + Content-Length instead
-#   of re-downloading the entire 17MB APK (pass --full-download-verify to force full download)
+# - `apk/huaben-v<ver>.apk`, `apk/huaben-latest.apk`, and legacy `apk/StoryNote-latest.apk`
+#   all share the exact same Git blob (0 extra upload bytes) for zero-breakage compatibility
+# - Integrity is verified in ~0.2s via HTTP HEAD ETag (Git blob SHA-1) + Content-Length
 #
 # Usage:
-#   ./scripts/publish-cnb-release.sh v1.2.0 dist/StoryNote-v1.2.0.apk "更新说明" [--full-download-verify]
+#   ./scripts/publish-cnb-release.sh v1.2.0 dist/huaben-v1.2.0.apk "更新说明" [--full-download-verify]
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
@@ -26,7 +25,7 @@ fi
 TAG="$1"
 VERSION="${TAG#v}"
 APK_PATH="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
-NOTES="${3:-StoryNote $TAG 更新}"
+NOTES="${3:-话本本 $TAG 更新}"
 FULL_DOWNLOAD_VERIFY=0
 for arg in "$@"; do
   if [ "$arg" = "--full-download-verify" ]; then
@@ -62,19 +61,21 @@ REPO_DIR="$TMP_DIR/repo"
 mkdir -p "$REPO_DIR/apk"
 git -C "$REPO_DIR" init -b main >/dev/null
 git -C "$REPO_DIR" remote add origin "https://cnb.cool/${CNB_REPO}.git"
-git -C "$REPO_DIR" config user.name "StoryNote Release Bot"
-git -C "$REPO_DIR" config user.email "release@storynote.local"
+git -C "$REPO_DIR" config user.name "Huaben Release Bot"
+git -C "$REPO_DIR" config user.email "release@m0m.app"
 git -C "$REPO_DIR" config http.postBuffer 524288000
 
 cp "$APK_PATH" "$REPO_DIR/apk/${ASSET_NAME}"
+cp "$APK_PATH" "$REPO_DIR/apk/huaben-latest.apk"
 cp "$APK_PATH" "$REPO_DIR/apk/StoryNote-latest.apk"
 
 APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/${ASSET_NAME}"
-LATEST_APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/StoryNote-latest.apk"
+LATEST_APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/huaben-latest.apk"
+LEGACY_LATEST_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/StoryNote-latest.apk"
 RELEASE_URL="https://cnb.cool/${CNB_REPO}"
 
 cat >"$REPO_DIR/README.md" <<EOF
-# StoryNote（小作家故事本）国内自动更新发布通道
+# 话本本（Huaben）国内自动更新发布通道
 
 - 当前版本：**v${VERSION}**
 - 安装包直链：${APK_URL}
@@ -104,9 +105,9 @@ with open(out, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
-echo "[1/2] Pushing ${ASSET_NAME} + StoryNote-latest.apk (${APK_SIZE} bytes, deduplicated) to CNB (${CNB_REPO})..."
-git -C "$REPO_DIR" add README.md latest.json "apk/${ASSET_NAME}" "apk/StoryNote-latest.apk"
-git -C "$REPO_DIR" commit -m "release: StoryNote ${TAG}" >/dev/null
+echo "[1/2] Pushing ${ASSET_NAME} + huaben-latest.apk (+ legacy alias, ${APK_SIZE} bytes deduplicated) to CNB (${CNB_REPO})..."
+git -C "$REPO_DIR" add README.md latest.json "apk/${ASSET_NAME}" "apk/huaben-latest.apk" "apk/StoryNote-latest.apk"
+git -C "$REPO_DIR" commit -m "release: 话本本 ${TAG}" >/dev/null
 git -C "$REPO_DIR" tag -f "$TAG"
 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$GIT_ASKPASS_SCRIPT" \
   git -C "$REPO_DIR" push --force -u origin main "refs/tags/${TAG}"
@@ -140,6 +141,7 @@ verify_head() {
 
 verify_head "$APK_URL"
 verify_head "$LATEST_APK_URL"
+verify_head "$LEGACY_LATEST_URL"
 
 if [ "$FULL_DOWNLOAD_VERIFY" -eq 1 ]; then
   VERIFY_APK="$TMP_DIR/verify.apk"

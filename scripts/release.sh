@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# One-command end-to-end StoryNote release pipeline (~25-35s warm).
+# One-command end-to-end 话本本 (Huaben) release pipeline (~15-30s warm).
 #
 # Automates:
 #   1. Version bump (app/build.gradle.kts + AppUpdateManager.kt, idempotent if already bumped)
 #   2. Static hygiene check + optional unit tests + Android Release APK build
-#   3. Domestic CNB auto-update channel publish (versioned + stable StoryNote-latest.apk + ETag verify)
+#   3. Domestic CNB auto-update channel publish (huaben-v<ver>.apk + huaben-latest.apk + ETag verify)
 #   4. Website release metadata sync (website/releases.json; HTML/QR stay permanently bound to latest)
 #   5. Git commit & push + lightweight GitHub Release (with CNB direct link; skips slow uploads.github.com)
 #
@@ -12,7 +12,7 @@
 #   ./scripts/release.sh <version, e.g. 1.2.1> "<note1>" ["<note2>" ...]
 #   Flags:
 #     --skip-tests      Skip :app:desktopTest when tests already passed on the same code
-#     --skip-build      Reuse existing dist/StoryNote-v<ver>.apk without rebuilding
+#     --skip-build      Reuse existing dist/huaben-v<ver>.apk without rebuilding
 #     --no-commit       Skip git commit/push and GitHub Release creation
 #     --github-apk      Also upload APK asset to GitHub Releases (off by default; slow on CN links)
 set -euo pipefail
@@ -52,13 +52,14 @@ VERSION="${RAW_VER#v}"
 TAG="v${VERSION}"
 NOTES_LIST=("${POSITIONAL[@]:1}")
 if [ "${#NOTES_LIST[@]}" -eq 0 ]; then
-  NOTES_LIST=("StoryNote ${TAG} 更新")
+  NOTES_LIST=("话本本 ${TAG} 更新")
 fi
+GH_REPO="${HUABEN_GITHUB_REPO:-catoncat/huaben}"
 
 T0="$(date +%s)"
 step_ts() { date +%s; }
 
-echo "=== StoryNote One-Shot Release: ${TAG} ==="
+echo "=== 话本本 One-Shot Release: ${TAG} ==="
 
 # 1. Idempotent version bump across app/build.gradle.kts and AppUpdateManager.kt
 T_STEP="$(step_ts)"
@@ -99,7 +100,7 @@ echo "      done in $(( $(step_ts) - T_STEP ))s"
 
 # 2. Static hygiene + build Release APK
 T_STEP="$(step_ts)"
-APK_OUT="dist/StoryNote-${TAG}.apk"
+APK_OUT="dist/huaben-${TAG}.apk"
 mkdir -p dist
 
 if [ "$SKIP_BUILD" -eq 0 ]; then
@@ -135,8 +136,8 @@ echo "      CNB published & verified in $(( $(step_ts) - T_STEP ))s"
 # 4. Sync website/releases.json
 T_STEP="$(step_ts)"
 CNB_REPO="${CNB_RELEASE_REPO:-lzb-prod/story-note-releases}"
-APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/StoryNote-${TAG}.apk"
-LATEST_APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/StoryNote-latest.apk"
+APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/huaben-${TAG}.apk"
+LATEST_APK_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/apk/huaben-latest.apk"
 MANIFEST_URL="https://cnb.cool/${CNB_REPO}/-/git/raw/main/latest.json"
 PUB_DATE="$(date +%Y-%m-%d)"
 
@@ -147,10 +148,9 @@ from pathlib import Path
 ver, tag, pub_date, size_s, size_label, sha256, apk_url, latest_url, manifest_url = sys.argv[1:10]
 notes = sys.argv[10:]
 path = Path("website/releases.json")
-existing = json.loads(path.read_text("utf-8")) if path.is_file() else {}
 data = {
-    "appName": existing.get("appName", "话本本"),
-    "subtitle": existing.get("subtitle", "小作家故事本"),
+    "appName": "话本本",
+    "subtitle": "开口讲故事，不用打字成绘本",
     "version": ver,
     "tag": tag,
     "publishedAt": pub_date,
@@ -169,23 +169,23 @@ echo "[4/5] Updated website/releases.json in $(( $(step_ts) - T_STEP ))s"
 # 5. Git commit/push + lightweight GitHub Release (skip slow uploads.github.com by default)
 T_STEP="$(step_ts)"
 if [ "$NO_COMMIT" -eq 0 ]; then
-  if [ -n "$(git status --porcelain app/ website/ scripts/ gradle.properties)" ]; then
+  if [ -n "$(git status --porcelain app/ website/releases.json scripts/ gradle.properties)" ]; then
     git add app/build.gradle.kts app/src/commonMain/kotlin/com/luna/storynote/update/AppUpdateManager.kt website/releases.json
     if [ -n "$(git diff --cached --name-only)" ]; then
-      git commit -m "chore: release StoryNote ${TAG}" >/dev/null
+      git commit -m "chore: release 话本本 ${TAG}" >/dev/null
     fi
   fi
   git push origin main
 
-  GH_NOTES="$(printf '### 主要更新\n'; for n in "${NOTES_LIST[@]}"; do printf -- '- %s\n' "$n"; done; printf '\n### 下载（国内直连）\n- [StoryNote-%s.apk](%s) (%s)\n- SHA-256: `%s`\n' "$TAG" "$APK_URL" "$SIZE_LABEL" "$APK_SHA256")"
-  if gh release view "$TAG" --repo catoncat/story-note >/dev/null 2>&1; then
-    gh release edit "$TAG" --repo catoncat/story-note --title "StoryNote ${TAG}" --notes "$GH_NOTES" >/dev/null
+  GH_NOTES="$(printf '### 主要更新\n'; for n in "${NOTES_LIST[@]}"; do printf -- '- %s\n' "$n"; done; printf '\n### 下载（国内直连）\n- [huaben-%s.apk](%s) (%s)\n- 固定最新版直链：[huaben-latest.apk](%s)\n- SHA-256: `%s`\n' "$TAG" "$APK_URL" "$SIZE_LABEL" "$LATEST_APK_URL" "$APK_SHA256")"
+  if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+    gh release edit "$TAG" --repo "$GH_REPO" --title "话本本 ${TAG}" --notes "$GH_NOTES" >/dev/null
   else
-    gh release create "$TAG" --repo catoncat/story-note --target main --title "StoryNote ${TAG}" --notes "$GH_NOTES" >/dev/null
+    gh release create "$TAG" --repo "$GH_REPO" --target main --title "话本本 ${TAG}" --notes "$GH_NOTES" >/dev/null
   fi
 
   if [ "$UPLOAD_GH_APK" -eq 1 ]; then
-    GODEBUG=http2client=0 gh release upload "$TAG" "$APK_OUT" --repo catoncat/story-note --clobber
+    GODEBUG=http2client=0 gh release upload "$TAG" "$APK_OUT" --repo "$GH_REPO" --clobber
   fi
   echo "[5/5] Git pushed & GitHub Release ${TAG} synced in $(( $(step_ts) - T_STEP ))s"
 else

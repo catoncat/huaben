@@ -14,7 +14,7 @@ object AppBuildInfo {
     const val VERSION_NAME = "1.2.0"
     const val VERSION_CODE = 6
     const val DEFAULT_MANIFEST_URL = "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/latest.json"
-    const val DEFAULT_GITHUB_REPO = "catoncat/story-note"
+    const val DEFAULT_GITHUB_REPO = "catoncat/huaben"
 }
 
 data class AppUpdateConfig(
@@ -131,7 +131,7 @@ class AppUpdateManager(
                 .url(url)
                 .header("Accept", "application/json")
                 .header("Cache-Control", "no-cache")
-                .header("User-Agent", "StoryNote/$currentVersion")
+                .header("User-Agent", "Huaben/$currentVersion")
                 .build()
             httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
@@ -171,7 +171,7 @@ class AppUpdateManager(
             val builder = Request.Builder()
                 .url(apiUrl)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "StoryNote/$currentVersion")
+                .header("User-Agent", "Huaben/$currentVersion")
             val token = config.githubToken.trim()
             if (token.isNotEmpty()) {
                 builder.header("Authorization", "Bearer $token")
@@ -241,8 +241,8 @@ class AppUpdateManager(
     ): File {
         updatesDir.mkdirs()
         val safeVer = update.versionName.replace(Regex("[^0-9A-Za-z._-]"), "_")
-        val finalApk = File(updatesDir, "StoryNote-v$safeVer.apk")
-        val partFile = File(updatesDir, ".StoryNote-v$safeVer.apk.part")
+        val finalApk = File(updatesDir, "huaben-v$safeVer.apk")
+        val partFile = File(updatesDir, ".huaben-v$safeVer.apk.part")
         if (partFile.exists()) partFile.delete()
 
         val token = config.githubToken.trim()
@@ -251,7 +251,7 @@ class AppUpdateManager(
 
         val reqBuilder = Request.Builder()
             .url(targetUrl)
-            .header("User-Agent", "StoryNote/${AppBuildInfo.VERSION_NAME}")
+            .header("User-Agent", "Huaben/${AppBuildInfo.VERSION_NAME}")
         if (useApiAsset) {
             reqBuilder.header("Accept", "application/octet-stream")
             reqBuilder.header("Authorization", "Bearer $token")

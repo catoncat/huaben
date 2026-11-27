@@ -125,7 +125,7 @@ object BookExporter {
             appendLine("<!DOCTYPE html>")
             appendLine("<html lang=\"zh-CN\"><head><meta charset=\"UTF-8\">")
             appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
-            appendLine("<title>$escapedTitle - 小作家故事本</title>")
+            appendLine("<title>$escapedTitle - 话本本</title>")
             appendLine("<style>")
             appendLine("body{margin:0;padding:28px 16px;background:#EFE9DC;color:#1F1A14;font-family:'Songti SC','Noto Serif CJK SC','STSong',serif;}")
             appendLine(".page{max-width:760px;margin:0 auto 28px;padding:42px 44px 32px;background:#FAF7F0;border:1px solid #DDD4C3;border-radius:16px;box-shadow:0 8px 24px rgba(31,26,20,.06);page-break-after:always;}")

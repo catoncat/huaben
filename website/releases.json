@@ -1,19 +1,19 @@
 {
   "appName": "话本本",
-  "subtitle": "小作家故事本",
+  "subtitle": "开口讲故事，不用打字成绘本",
   "version": "1.2.0",
   "tag": "v1.2.0",
   "publishedAt": "2026-11-27",
-  "sizeBytes": 17618215,
+  "sizeBytes": 17618207,
   "sizeLabel": "16.8 MB",
-  "sha256": "fb325535ab548d85dbb1159c567aada1c923e376aa533475a6d4b12b8b0becd7",
-  "apkUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.2.0.apk",
-  "latestApkUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk",
+  "sha256": "376898729939e932bec4efa615c0f1da3a7ce556ce6776686c2109269fc5330a",
+  "apkUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/huaben-v1.2.0.apk",
+  "latestApkUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/huaben-latest.apk",
   "manifestUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/latest.json",
   "releaseNotes": [
+    "品牌全面统一为「话本本」（安卓桌面名、导出绘本标题、安装包与仓库名均已对齐，兼容老设备无缝覆盖升级）",
     "新增家长全文校对模式：长按阅读页右上角「校对」进入纯净暖纸全文编辑，防儿童误触",
     "保存时离线按字形与无调拼音自动对齐童声原声：改错别字保留原声、删句跳过废音、新增或重写自动解绑避免音画错位",
-    "整次全文校对自动合并为单条时光机快照，随时一键撤回",
-    "适配安卓全面屏软键盘，保留原有书架导出故事包与 CNB 国内直连自动更新"
+    "整次全文校对自动合并为单条时光机快照，随时一键撤回"
   ]
 }
