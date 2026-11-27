@@ -1,28 +1,77 @@
-# 小作家故事本 (`com.luna.storynote`, v1.0.0)
+<div align="center">
+  <img src="website/assets/app-icon.png" alt="话本本图标" width="88" />
+  <h1>话本本</h1>
+  <p><strong>开口讲出故事，不用打字成绘本。</strong></p>
+  <p>按住说一句，纸页上长出拼音、留住童声，还能配水彩插画。</p>
+  <p>
+    <a href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk"><strong>下载 Android APK（国内直连）</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/catoncat/story-note/releases">更新记录</a>
+  </p>
+</div>
 
-面向准一年级（7 岁左右、正在学拼音认字、不会打字）小朋友设计的**语音创作与注音互动故事书应用**（Compose Multiplatform：同一套代码同时运行于 **macOS 本地原生窗口** 与 **Android 独立 APK**，零额外环境安装，全离线可用）：
+---
 
-- **精装绘本书架与全屏沉浸式书页**：[BookshelfScreen.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/BookshelfScreen.kt) 与 [InteractiveBookSpread.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/InteractiveBookSpread.kt) 采用亚麻装帧书脊、烫金线稿徽章与全屏暖纸（`#FAF7F0`）沉浸阅读体验，支持平板横屏双页对开（左水彩插画 + 右注音正文）及竖屏/手机响应式单页，支持**触控滑动、左右边缘点击/按钮翻页及桌面键盘 `←` / `→` 翻页**；全界面 Lucide 矢量图标 + 简洁中文短标签，零 Emoji、零说教提示文案。
-- **声文合一逐句创作与时光机**：[UtteranceStreamRecorder.kt](app/src/commonMain/kotlin/com/luna/storynote/audio/UtteranceStreamRecorder.kt) 基于豆包流式语音与停顿断句，点击书页底部麦克风即可边讲边在呼吸墨迹光标处长出带拼音的文字，自动按语义切分 `8–16` 字短句并绑定连续 `16kHz WAV` 原声时间轴区间；[TimeMachineStore.kt](app/src/commonMain/kotlin/com/luna/storynote/storage/TimeMachineStore.kt) 自动保存每次修改快照，支持单句历史原声回放与一键还原。
-- **双层原位点按交互（词语优先分词）**：
-  - **点任意汉字/词语** → 离线 `jieba-analysis` 词语优先切分（[JiebaWordSegmenter.kt](app/src/commonMain/kotlin/com/luna/storynote/literacy/JiebaWordSegmenter.kt)），整词高亮并弹出 [TianZiGeWordSheet.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/TianZiGeWordSheet.kt) **田字格认字拼读卡**：内置离线 `3,755` 个国标一级汉字楷体逐笔动画（[HanziStrokeRepository.kt](app/src/commonMain/kotlin/com/luna/storynote/literacy/HanziStrokeRepository.kt)）、部编版一年级声母/介母/韵母拆解、标准普通话点读、同音字纠错、`重念换词` 与收入字词盒。
-  - **点句首声波圆点** → 播放该句原声，并浮出清晰标注的操作胶囊（`播放` / `重说` / `插句` / `改字`（配置 AI 后）/ `历史` / `删`）；点页面留白即可移动续写光标。
-- **部编版一年级标准注音与避头尾排版**：[PinyinAnnotator.kt](app/src/commonMain/kotlin/com/luna/storynote/literacy/PinyinAnnotator.kt) 支持常见多音字词组消歧、轻声词表及 `一 / 不` 变调规则。
-- **3D 翻转字词盒与家长设置**：[WordBoxFlashcardScreen.kt](app/src/commonMain/kotlin/com/luna/storynote/ui/WordBoxFlashcardScreen.kt) 正面纯汉字自测、180° 翻转揭示拼音并回放原声/普通话例句；长按书架角落设置齿轮打开家长设置（OpenAI 兼容文本/生图端点，Android APK 零内置密钥）。
+给正在学拼音认字、还不会打字的小朋友做的一本温柔故事书。  
+打开就能用，没有广告，不强制登录，孩子的作品和原声都安安静静留在本地。
 
-## 本地直接打开桌面版预览（零额外环境）
+### 为什么做它
+
+| 留住童声 | 改错不怕 | 本地零打扰 |
+| :--- | :--- | :--- |
+| 点哪句播哪句，写完一键拼成整本童声录音和可打印绘本。 | 语音改词、换同音字、家长全文校对，每一步进时光机随时撤回。 | 无广告、不强制登录；AI 接口完全由家长在设置里掌控。 |
+
+---
+
+### 用起来是什么样子
+
+- **开口成书**  
+  像翻一本暖纸精装绘本：平板横屏左图右文双页摊开，手机竖屏整页留给故事。孩子按住麦克风自然讲故事，纸页上自动长出带标准拼音的短句，每一句都留着孩子自己的原声。
+
+- **点字认字，顺手换错字**  
+  点正文里的任意词语，弹出田字格识字卡：看楷体逐笔动画、拆解声母韵母、听标准读音，也能一键换同音字或重念换词。喜欢的词收进「字词盒」，翻开复习时还能回听孩子当时的原声例句。
+
+- **点句首圆点，随时重说与调整**  
+  点每句开头的声波圆点，可以单句回听、重说、在句后插新句或删掉这句；写卡壳时，还可以请右上角的小星星轻声给一句续写启发。
+
+- **家长全文校对**  
+  长按阅读页右上角的「校对」（轻点静默，防孩子误触），进入像备忘录一样干净的全文纸页，直接用键盘改书名、修错别字、增删句子或调整分段。点「完成」后，系统会静默把文字重新对齐回童声原声，无需操心任何音轨操作。
+
+- **时光机与整本带走**  
+  每一次改动都会自动留档，随时回听旧录音、一键回到刚才。长按书架上的故事书，就能导出无缝拼接的完整童声录音、带拼音可打印绘本网页和整本故事包。
+
+- **按需开启的 AI 伴读（可完全离线使用）**  
+  核心的语音写书、拼音排版、田字格笔顺、字词盒和导出功能均可离线使用。长按书架角落设置图标可进入家长设置，按需填入自己的 OpenAI 兼容接口，开启水彩插画、语音改句与续写启发。
+
+---
+
+### 下载安装
+
+支持 **Android 8.0 及以上平板与手机**（装好后支持在家长设置里一键检查并覆盖更新）。
+
+- **国内直连最新版**：[StoryNote-latest.apk](https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-latest.apk)
+- **历史版本与校验值**：[GitHub Releases](https://github.com/catoncat/story-note/releases)
+
+<p>
+  <img src="website/assets/qr-apk.png" alt="手机扫码直接下载话本本 APK" width="140" />
+</p>
+
+---
+
+<details>
+<summary>开发者本地运行与构建</summary>
+
+需要 JDK 17 与 Android SDK：
 
 ```bash
-~/fun/story-note/run-local.sh
-```
+# macOS 本地窗口预览
+./run-local.sh
 
-桌面窗口支持自由调整尺寸实时预览响应式排版（横屏对开 / 竖屏单页 / 手机），可直接用 Mac 麦克风试录与点读，并支持鼠标边缘点击与键盘 `←` / `→` 翻页。
-
-## 编译测试与安卓独立 APK
-
-```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-cd ~/fun/story-note
+# 运行测试与打包 Android Release APK
 ./gradlew :app:desktopTest :app:assembleRelease
-# 产物：dist/StoryNote-v1.0.0.apk
+
+# 一键发版（同步版本、打包、推送 CNB 自动更新源并更新清单）
+./scripts/release.sh 1.2.1 "更新说明"
 ```
+
+</details>
