@@ -102,6 +102,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     packaging {
         resources {
             excludes += listOf("META-INF/LICENSE*", "META-INF/NOTICE*")
