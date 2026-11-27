@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-release-json="../releases.json">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>话本本（小作家故事本）— 开口讲故事，马上一本带拼音的有声绘本</title>
+  <meta name="description" content="专为 6–8 岁孩子设计的语音绘本与识字创作本。开口讲故事自动分句标拼音、保留孩子原声，点字田字格认读，支持温柔 AI 配图与一键导出整本有声故事包。" />
+  <meta name="theme-color" content="#fafafa" />
+  <link rel="icon" type="image/png" href="../assets/favicon.png" />
+  <script>
+    try {
+      const t = localStorage.getItem('site-theme-mode');
+      if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+    } catch (_) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="../product.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar band">
+      <div class="brand-link">
+        <a class="nav-btn" href="../" style="padding: 0 8px 0 4px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          <span>总站</span>
+        </a>
+        <img class="brand-icon-img" src="../assets/app-icon.png" alt="话本本图标" width="28" height="28" />
+        <span class="brand-name">话本本<span class="muted hide-mobile-inline"> · 故事本</span></span>
+      </div>
+      <nav class="nav-actions" aria-label="产品页导航">
+        <a class="nav-btn hide-mobile" href="#preview">界面</a>
+        <a class="nav-btn hide-mobile" href="#try">试玩</a>
+        <a class="nav-btn" href="#download">下载</a>
+        <button type="button" class="nav-btn nav-btn-icon" data-theme-toggle aria-label="切换亮色或暗色主题" aria-pressed="false">
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+        </button>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero band">
+        <div class="app-row-head" style="margin-bottom: 18px;">
+          <span class="tag tag-brand mono" data-release-version>v1.1.0</span>
+          <span class="tag">Android 手机 &amp; 7 寸平板 · macOS</span>
+        </div>
+        <h1 class="hero-display">
+          <span class="hero-line">开口讲出<span class="hero-emphasis">故事</span></span>
+          <span class="hero-line">不用<del class="hero-strike">打字</del>成绘本</span>
+        </h1>
+        <p class="hero-sub">
+          专为 6–8 岁孩子做的语音绘本与识字创作本。按下录音键说一句话，纸页上立刻长出带拼音的句子并完整保留孩子的原声；点任意词语进田字格认读，写完还能导出整本有声故事包。
+        </p>
+        <div class="hero-cta-row">
+          <a class="btn btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.1.0.apk">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            <span>下载 Android APK</span>
+            <span class="mono" style="opacity: 0.72; font-size: 12px;" data-release-size>16.8 MB</span>
+          </a>
+          <a class="btn btn-muted" href="#download">手机扫码安装</a>
+          <button type="button" class="btn btn-outline" data-copy-text="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.1.0.apk" data-copy-toast="已复制国内直连 APK 链接">
+            复制直链
+          </button>
+        </div>
+      </section>
+
+      <section id="preview" class="band" aria-label="真实界面预览">
+        <div class="stage-head">
+          <span class="stage-label">真实界面</span>
+          <div class="tab-group" role="tablist" aria-label="切换设备与功能画面">
+            <button type="button" class="tab-btn is-active" role="tab" aria-selected="true"
+              data-shot-tab data-ratio="phone"
+              data-src="../assets/shot-phone-reader.webp"
+              data-alt="手机沉浸阅读页"
+              data-caption="手机阅读页：默认隐藏顶栏，整页留给故事与拼音，点空白呼出工具栏。">手机阅读</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab data-ratio="wide"
+              data-src="../assets/shot-tablet-spread.webp"
+              data-alt="平板横屏双页摊开"
+              data-caption="平板与桌面横屏：左图右文真实绘本摊开，带书脊压痕与柔边水彩配图。">双页摊开</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab data-ratio="wide"
+              data-src="../assets/shot-tianzige.webp"
+              data-alt="田字格识字与词语卡片"
+              data-caption="田字格识字卡：按语义离线分词，点击汉字看拼音、笔顺与同音字替换。">田字格识字</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab data-ratio="wide"
+              data-src="../assets/shot-time-machine.webp"
+              data-alt="时光机版本回溯"
+              data-caption="时光机：自动记录每次真实修改摘要与旧录音，孩子改错随时一键回到刚才。">时光机</button>
+            <button type="button" class="tab-btn" role="tab" aria-selected="false"
+              data-shot-tab data-ratio="phone"
+              data-src="../assets/shot-phone-bookshelf.webp"
+              data-alt="故事书架"
+              data-caption="故事书架：长按任意绘本即可导出完整拼接录音 WAV 与带拼音图文故事包。">书架</button>
+          </div>
+        </div>
+        <div class="stage-canvas">
+          <div class="shot-frame is-phone" data-shot-frame>
+            <img data-shot-img src="../assets/shot-phone-reader.webp" alt="手机沉浸阅读页" />
+          </div>
+          <p class="stage-caption" data-shot-caption>手机阅读页：默认隐藏顶栏，整页留给故事与拼音，点空白呼出工具栏。</p>
+        </div>
+      </section>
+
+      <section id="try" class="band" aria-label="交互式拼音书页试玩">
+        <div class="stage-head">
+          <span class="stage-label">点一点句子里的词，体验田字格识字</span>
+          <span class="tag">互动书页示例</span>
+        </div>
+        <div class="demo-wrap">
+          <p class="demo-sentence">
+            <button type="button" class="word-chip is-active" data-word-key="dino"><ruby>小<rt>xiǎo</rt>恐<rt>kǒng</rt>龙<rt>lóng</rt></ruby></button>
+            <button type="button" class="word-chip" data-word-key="slowly"><ruby>慢<rt>màn</rt>慢<rt>màn</rt>地<rt>de</rt></ruby></button>
+            <ruby>走<rt>zǒu</rt>出<rt>chū</rt>了<rt>le</rt></ruby>
+            <button type="button" class="word-chip" data-word-key="room"><ruby>房<rt>fáng</rt>间<rt>jiān</rt></ruby></button>，
+            <ruby>终<rt>zhōng</rt>于<rt>yú</rt>来<rt>lái</rt>到<rt>dào</rt>了<rt>le</rt></ruby>
+            <button type="button" class="word-chip" data-word-key="forest"><ruby>大<rt>dà</rt>森<rt>sēn</rt>林<rt>lín</rt></ruby></button>。
+          </p>
+          <div class="tianzi-card">
+            <div class="tianzi-top">
+              <span class="tianzi-py mono" data-tianzi-py>xiǎo · kǒng · lóng</span>
+              <button type="button" class="btn btn-sm btn-muted" data-tianzi-speak>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                <span>听读音</span>
+              </button>
+            </div>
+            <div class="tianzi-boxes" data-tianzi-boxes></div>
+            <p class="tianzi-note" data-tianzi-note>故事主角词组，点击可收进「字词盒」，随时回听孩子自己的原声例句。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid-2 band" aria-label="核心功能">
+        <article class="cell">
+          <h2 class="cell-title">说话即成书，保留童声原味</h2>
+          <p class="cell-body">无需键盘打字，离线自动标好注音与分段。点句子就回放孩子自己讲的那一句，顶部可从头到尾连播整本有声故事。</p>
+        </article>
+        <article class="cell">
+          <h2 class="cell-title">点字田字格与字词盒</h2>
+          <p class="cell-body">内置离线语义分词，点击词语展示田字格、拼音、笔顺与同音字候选项；好词一键收进「字词盒」，按原声例句复习。</p>
+        </article>
+        <article class="cell">
+          <h2 class="cell-title">克制的 AI 调整与插画</h2>
+          <p class="cell-body">选一句就能语音发出「AI调整」指令（支持跨句联动修改），也能为故事画柔边水彩插画。所有改动进时光机，不满意随时撤回。</p>
+        </article>
+        <article class="cell">
+          <h2 class="cell-title">一键导出完整故事包</h2>
+          <p class="cell-body">书架长按整本书，自动将保留句无缝拼接成一支干净的「完整录音.wav」，连同可打印带拼音图文 HTML 与 Markdown 打包分享。</p>
+        </article>
+      </section>
+
+      <section id="privacy" class="grid-3 band" aria-label="隐私与家长掌控">
+        <article class="cell">
+          <h2 class="cell-title">纯本地存储</h2>
+          <p class="cell-body">书本、原声录音与时光机快照全部存在设备本地目录，不设强制登录，不上传云端做用户画像。</p>
+        </article>
+        <article class="cell">
+          <h2 class="cell-title">家长掌控 AI</h2>
+          <p class="cell-body">未配置 API 时全部写作、拼音、田字格与录音功能照常离线使用；在「家长设置」接入自有接口即可解锁 AI 能力。</p>
+        </article>
+        <article class="cell">
+          <h2 class="cell-title">国内直连升级</h2>
+          <p class="cell-body">内置 CNB 国内公开更新清单，启动静默检查新版本，家长在设置里点一下即可下载并覆盖升级。</p>
+        </article>
+      </section>
+
+      <section id="download" class="download-band band" aria-label="下载与更新日志">
+        <div class="download-main">
+          <div class="app-row-head">
+            <h2 class="app-row-title">获取最新版本</h2>
+            <span class="tag tag-brand mono" data-release-version>v1.1.0</span>
+            <span class="tag mono" data-release-size>16.8 MB</span>
+          </div>
+          <p class="cell-body">支持 Android 8.0 及以上手机与平板。下载后直接点击安装即可（首次升级需允许浏览器安装未知应用）。</p>
+          <ul class="changelog-list" data-release-notes>
+            <li>修复安卓与 macOS 朗读无声与跳过句子的底层播放问题</li>
+            <li>全新全出血「探头小恐龙」应用图标，适配安卓圆形与圆角矩形桌面</li>
+            <li>内置 CNB 国内直连自动更新检测与一键覆盖升级</li>
+            <li>书架长按导出完整故事包：无缝拼接整本录音 WAV + 可打印带拼音绘本 HTML + ZIP</li>
+            <li>时光机去除后台批注噪音，清晰展示每一步真实修改摘要</li>
+            <li>手机端沉浸阅读：默认隐藏顶栏点空白呼出，句子「AI调整」支持跨句修改</li>
+          </ul>
+          <div class="app-row-actions" style="margin-top: 18px;">
+            <a class="btn btn-primary" data-release-apk href="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.1.0.apk">
+              <span>直接下载 Android APK</span>
+            </a>
+            <button type="button" class="btn btn-outline" data-copy-text="https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.1.0.apk" data-copy-toast="已复制国内直连 APK 链接">
+              <span>复制链接</span>
+            </button>
+          </div>
+          <p class="meta-line mono">SHA-256: <span data-release-sha>ed165b1483bc431a…</span></p>
+        </div>
+        <div class="download-qr">
+          <div class="qr-frame">
+            <img src="../assets/qr-apk.png" alt="扫码下载话本本 Android 安装包二维码" width="128" height="128" />
+          </div>
+          <span class="cell-body" style="font-size: 12.5px;">手机扫码直连下载 APK<br />国内 CNB 通道，免登录秒下</span>
+        </div>
+      </section>
+    </main>
+
+    <div class="footer-wordmark" aria-hidden="true">
+      <svg data-wordmark-svg viewBox="0 0 560 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="wm-fill-hb" x1="280" y1="12" x2="280" y2="142" gradientUnits="userSpaceOnUse">
+            <stop stop-color="var(--footer-stroke)" stop-opacity="0.02" />
+            <stop offset="1" stop-color="var(--footer-stroke)" stop-opacity="0.18" />
+          </linearGradient>
+          <linearGradient id="wm-glow-hb" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#fad033" />
+            <stop offset="45%" stop-color="#f95e2b" />
+            <stop offset="100%" stop-color="#3fa1f9" />
+          </linearGradient>
+          <filter id="wm-blur-hb" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="24" />
+          </filter>
+          <mask id="wm-mask-hb">
+            <g font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif" font-size="108" font-weight="800" letter-spacing="10" text-anchor="middle" stroke="#ffffff" stroke-width="1.6" fill="none" opacity="0.85">
+              <text x="274" y="114">HUABEN</text>
+              <text x="280" y="120">HUABEN</text>
+            </g>
+          </mask>
+        </defs>
+        <g font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif" font-size="108" font-weight="800" letter-spacing="10" text-anchor="middle">
+          <text x="274" y="114" fill="none" stroke="var(--footer-stroke)" stroke-opacity="0.22" stroke-width="1">HUABEN</text>
+          <text x="280" y="120" fill="url(#wm-fill-hb)" stroke="var(--footer-stroke)" stroke-opacity="0.45" stroke-width="1">HUABEN</text>
+        </g>
+        <g mask="url(#wm-mask-hb)">
+          <circle id="glow-circle" cx="280" cy="84" r="95" fill="url(#wm-glow-hb)" filter="url(#wm-blur-hb)" />
+        </g>
+      </svg>
+    </div>
+
+    <footer class="footer-bar">
+      <span>© 2026 话本本 · 6ig.org</span>
+      <div class="footer-links">
+        <a href="../">返回总站</a>
+        <a href="#privacy">隐私说明</a>
+        <a href="#download">下载安装包</a>
+      </div>
+    </footer>
+  </div>
+  <script src="../site.js"></script>
+</body>
+</html>

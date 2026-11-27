@@ -1,0 +1,20 @@
+{
+  "appName": "话本本",
+  "subtitle": "小作家故事本",
+  "version": "1.1.0",
+  "tag": "v1.1.0",
+  "publishedAt": "2026-11-26",
+  "sizeBytes": 17585447,
+  "sizeLabel": "16.8 MB",
+  "sha256": "ed165b1483bc431a2dbac9dd09b3a73e9b15bb9afad85f056af2ea031bccd53e",
+  "apkUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/apk/StoryNote-v1.1.0.apk",
+  "manifestUrl": "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/latest.json",
+  "releaseNotes": [
+    "修复安卓与 macOS 朗读无声与跳过句子的底层播放问题",
+    "全新全出血「探头小恐龙」应用图标，适配安卓圆形与圆角矩形桌面",
+    "内置 CNB 国内直连自动更新检测与一键覆盖升级",
+    "书架长按导出完整故事包：无缝拼接整本录音 WAV + 可打印带拼音绘本 HTML + ZIP",
+    "时光机去除后台批注噪音，清晰展示每一步真实修改摘要",
+    "手机端沉浸阅读：默认隐藏顶栏点空白呼出，句子「AI调整」支持跨句修改"
+  ]
+}
