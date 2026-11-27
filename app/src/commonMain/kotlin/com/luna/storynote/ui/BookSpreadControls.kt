@@ -41,11 +41,13 @@ import com.luna.storynote.ui.icons.IconEraserBlock
 import com.luna.storynote.ui.icons.IconIllustratePage
 import com.luna.storynote.ui.icons.IconInsertSentence
 import com.luna.storynote.ui.icons.IconPauseAudio
+import com.luna.storynote.ui.icons.IconPenLine
 import com.luna.storynote.ui.icons.IconPlayAudio
 import com.luna.storynote.ui.icons.IconRespeakWave
 import com.luna.storynote.ui.icons.IconSparkStar
 import com.luna.storynote.ui.icons.IconTimeMachine
 import com.luna.storynote.ui.icons.IconVoiceRevise
+import com.luna.storynote.ui.motion.springCombinedPressScale
 import com.luna.storynote.ui.motion.springPressScale
 
 @Composable
@@ -60,6 +62,7 @@ internal fun ReaderActionPill(
     onIllustratePage: () -> Unit,
     onTriggerSpark: () -> Unit,
     onOpenTimeMachine: () -> Unit,
+    onOpenFullTextEditor: () -> Unit = {},
     compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -146,6 +149,20 @@ internal fun ReaderActionPill(
                     .semantics { contentDescription = "历史" },
             ) {
                 IconTimeMachine(color = InkPrimary, size = 14.dp)
+            }
+
+            PillDivider()
+            LongPressCapsuleButton(
+                label = "校对",
+                labelColor = InkPrimary,
+                compact = compact,
+                onClick = {},
+                onLongClick = onOpenFullTextEditor,
+                modifier = Modifier
+                    .testTag("proofread_button")
+                    .semantics { contentDescription = "校对" },
+            ) {
+                IconPenLine(color = InkPrimary, size = 14.dp)
             }
         }
     }
@@ -288,7 +305,40 @@ private fun LabelledCapsuleButton(
             .clip(CircleShape)
             .background(containerColor)
             .springPressScale(pressedScale = 0.92f, enabled = enabled, onClick = onClick)
-            .padding(horizontal = if (compact) 6.dp else 9.dp),
+            .padding(horizontal = if (compact) 5.dp else 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 4.dp),
+    ) {
+        icon()
+        Text(
+            text = label,
+            fontSize = if (compact) 11.sp else 11.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = labelColor,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+@Composable
+private fun LongPressCapsuleButton(
+    label: String,
+    labelColor: Color,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    containerColor: Color = Color.Transparent,
+    compact: Boolean = false,
+    icon: @Composable () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .height(if (compact) 30.dp else 32.dp)
+            .clip(CircleShape)
+            .background(containerColor)
+            .springCombinedPressScale(pressedScale = 0.92f, onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = if (compact) 5.dp else 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 4.dp),
     ) {

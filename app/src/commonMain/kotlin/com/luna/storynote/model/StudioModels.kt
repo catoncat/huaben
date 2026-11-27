@@ -112,6 +112,7 @@ data class StudioUiState(
     val timeMachineSnapshots: List<TimeMachineSnapshot> = emptyList(),
     val isTimeMachineOpen: Boolean = false,
     val timeMachineTargetClauseId: String? = null,
+    val isFullTextEditorOpen: Boolean = false,
     val illustratingPageIndex: Int? = null,
     val isVoiceRevising: Boolean = false,
     val isVoiceSparkSpeaking: Boolean = false,

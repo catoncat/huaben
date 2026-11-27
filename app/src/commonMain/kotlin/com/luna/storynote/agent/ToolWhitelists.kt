@@ -15,6 +15,7 @@ enum class ToolId(val toolName: String) {
     APPEND_CLAUSE("append_clause"),
     INSERT_CLAUSE_AFTER("insert_clause_after"),
     REPLACE_SPAN("replace_span"),
+    EDIT_FULL_TEXT("edit_full_text"),
     RERECORD_CLAUSE_AUDIO("rerecord_clause_audio"),
     ERASE_CLAUSE("erase_clause"),
     TOGGLE_PARAGRAPH_BREAK("toggle_paragraph_break"),

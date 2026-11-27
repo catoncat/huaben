@@ -279,3 +279,23 @@ fun IconIllustratePage(color: Color = InkPrimary, size: Dp = 18.dp) {
         }
     }
 }
+
+@Composable
+fun IconPenLine(color: Color = InkPrimary, size: Dp = 18.dp) {
+    Canvas(Modifier.size(size)) {
+        lucideCanvas { s, stroke ->
+            drawLine(color, Offset(12f * s, 20f * s), Offset(21f * s, 20f * s), strokeWidth = stroke.width, cap = StrokeCap.Round)
+            val pen = Path().apply {
+                moveTo(16.5f * s, 3.5f * s)
+                cubicTo(17.3f * s, 2.7f * s, 18.7f * s, 2.7f * s, 19.5f * s, 3.5f * s)
+                lineTo(20.5f * s, 4.5f * s)
+                cubicTo(21.3f * s, 5.3f * s, 21.3f * s, 6.7f * s, 20.5f * s, 7.5f * s)
+                lineTo(8f * s, 20f * s)
+                lineTo(3f * s, 21f * s)
+                lineTo(4f * s, 16f * s)
+                close()
+            }
+            drawPath(pen, color, style = stroke)
+        }
+    }
+}

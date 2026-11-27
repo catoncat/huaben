@@ -124,6 +124,7 @@ fun InteractiveBookSpreadScreen(
                     val modalOpen = uiState.isRecording ||
                         uiState.inspectedWord != null ||
                         uiState.isTimeMachineOpen ||
+                        uiState.isFullTextEditorOpen ||
                         uiState.isParentSettingsOpen
                     if (!modalOpen && ev.type == KeyEventType.KeyDown) {
                         when (ev.key) {
@@ -268,6 +269,7 @@ fun InteractiveBookSpreadScreen(
                         onIllustratePage = { controller.illustrateCurrentPage() },
                         onTriggerSpark = { controller.triggerVoiceSpark() },
                         onOpenTimeMachine = { controller.openTimeMachine() },
+                        onOpenFullTextEditor = { controller.openFullTextEditor() },
                         compact = isNarrowPhone,
                         modifier = Modifier.align(Alignment.CenterEnd),
                     )
@@ -394,6 +396,15 @@ fun InteractiveBookSpreadScreen(
                 uiState = uiState,
                 controller = controller,
                 bookFont = bookFont,
+            )
+        }
+
+        if (uiState.isFullTextEditorOpen) {
+            FullTextEditorSheet(
+                book = book,
+                bookFont = bookFont,
+                onCancel = { controller.closeFullTextEditor() },
+                onSave = { newTitle, newFullText -> controller.saveFullTextEdit(newTitle, newFullText) },
             )
         }
     }

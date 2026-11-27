@@ -275,6 +275,24 @@ private fun renderVerificationSuite(outDir: File) {
         renderShot(File(outDir, "10-word-box.png"), 960, 600) {
             MaterialTheme { StoryStudioRoot(wordBoxState, controller) }
         }
+        val editorState = cleanLandscapeState.copy(isFullTextEditorOpen = true)
+        renderShot(File(outDir, "11-full-text-editor-landscape.png"), 960, 600) {
+            MaterialTheme { StoryStudioRoot(editorState, controller) }
+        }
+        renderShot(File(outDir, "12-full-text-editor-phone.png"), 390, 844) {
+            MaterialTheme { StoryStudioRoot(editorState, controller) }
+        }
+        val phoneTopBarAiState = cleanLandscapeState.copy(
+            aiConfig = com.luna.storynote.model.AiGatewayConfig(
+                baseUrl = "https://example.invalid/v1",
+                apiKey = "sk-preview",
+                textModel = "preview-model",
+            ),
+            isFullBookPlaying = true,
+        )
+        renderShot(File(outDir, "13-phone-top-bar-ai.png"), 390, 844) {
+            MaterialTheme { StoryStudioRoot(phoneTopBarAiState, controller) }
+        }
 
         controller.dispose()
     } finally {

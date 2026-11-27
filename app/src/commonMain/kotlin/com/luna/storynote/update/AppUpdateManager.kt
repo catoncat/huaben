@@ -11,8 +11,8 @@ import java.nio.file.attribute.PosixFilePermission
 import java.util.concurrent.TimeUnit
 
 object AppBuildInfo {
-    const val VERSION_NAME = "1.1.0"
-    const val VERSION_CODE = 5
+    const val VERSION_NAME = "1.2.0"
+    const val VERSION_CODE = 6
     const val DEFAULT_MANIFEST_URL = "https://cnb.cool/lzb-prod/story-note-releases/-/git/raw/main/latest.json"
     const val DEFAULT_GITHUB_REPO = "catoncat/story-note"
 }

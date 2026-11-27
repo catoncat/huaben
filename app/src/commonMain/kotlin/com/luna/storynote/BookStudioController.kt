@@ -159,6 +159,7 @@ class BookStudioController(
     ): StudioUiState = copy(
         destination = dest, activeBookId = bookId, currentPageIndex = 0, cursorAfterClauseId = cursorId,
         selectedClauseId = null, inspectedWord = null, isTimeMachineOpen = false, timeMachineTargetClauseId = null,
+        isFullTextEditorOpen = false,
         illustratingPageIndex = null, isVoiceRevising = false, isVoiceSparkSpeaking = false, activeSparkQuestion = null,
     )
 
@@ -192,7 +193,7 @@ class BookStudioController(
 
     fun openWordBox() {
         stopAllAudioAndMic()
-        _uiState.update { it.copy(destination = StudioDestination.WORD_BOX, inspectedWord = null, isTimeMachineOpen = false, timeMachineTargetClauseId = null) }
+        _uiState.update { it.copy(destination = StudioDestination.WORD_BOX, inspectedWord = null, isTimeMachineOpen = false, timeMachineTargetClauseId = null, isFullTextEditorOpen = false) }
     }
 
     fun setCurrentPage(pageIndex: Int) {
@@ -358,10 +359,58 @@ class BookStudioController(
         stopAudioPlayback()
         val bookId = _uiState.value.activeBookId ?: return
         val snaps = repo.timeMachine.listSnapshots(bookId)
-        _uiState.update { it.copy(timeMachineSnapshots = snaps, isTimeMachineOpen = true, timeMachineTargetClauseId = clauseId, selectedClauseId = null, inspectedWord = null, activeSparkQuestion = null) }
+        _uiState.update { it.copy(timeMachineSnapshots = snaps, isTimeMachineOpen = true, timeMachineTargetClauseId = clauseId, isFullTextEditorOpen = false, selectedClauseId = null, inspectedWord = null, activeSparkQuestion = null) }
     }
 
     fun closeTimeMachine() { stopAudioPlayback(); _uiState.update { it.copy(isTimeMachineOpen = false, timeMachineTargetClauseId = null) } }
+
+    fun openFullTextEditor() {
+        stopAllAudioAndMic()
+        if (_uiState.value.activeBookId == null) return
+        _uiState.update {
+            it.copy(
+                isFullTextEditorOpen = true,
+                isTimeMachineOpen = false,
+                timeMachineTargetClauseId = null,
+                selectedClauseId = null,
+                inspectedWord = null,
+                activeSparkQuestion = null,
+            )
+        }
+    }
+
+    fun closeFullTextEditor() {
+        _uiState.update { it.copy(isFullTextEditorOpen = false) }
+    }
+
+    fun saveFullTextEdit(newTitle: String, newFullText: String) {
+        val bookId = _uiState.value.activeBookId ?: return
+        stopAllAudioAndMic()
+        scope.launch(Dispatchers.IO) {
+            val res = dispatchUserTool(
+                ToolId.EDIT_FULL_TEXT,
+                "bookId" to bookId,
+                "title" to newTitle,
+                "fullText" to newFullText,
+            )
+            val changed = (res?.data?.get("changed") as? Boolean) == true
+            refreshBookState(bookId) { st ->
+                val active = st.activeBook
+                val maxPage = ((active?.paginate()?.size ?: 1) - 1).coerceAtLeast(0)
+                val nextCursor = st.cursorAfterClauseId?.takeIf { cid -> active?.clauses?.any { it.id == cid } == true }
+                    ?: active?.clauses?.lastOrNull()?.id
+                st.copy(
+                    currentPageIndex = st.currentPageIndex.coerceAtMost(maxPage),
+                    cursorAfterClauseId = nextCursor,
+                    selectedClauseId = null,
+                    inspectedWord = null,
+                    activeSparkQuestion = null,
+                    isFullTextEditorOpen = false,
+                )
+            }
+            if (changed) postNotice("已保存校对")
+        }
+    }
     fun restoreSnapshot(snapshotId: String) = restoreHistory(snapshotId, clauseId = null)
     fun restoreClauseFromSnapshot(snapshotId: String, clauseId: String) = restoreHistory(snapshotId, clauseId)
 

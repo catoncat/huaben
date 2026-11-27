@@ -106,6 +106,8 @@ class ToolBus @JvmOverloads constructor(
 
             ToolId.REPLACE_SPAN -> executeReplaceSpan(toolId, bookId, params)
 
+            ToolId.EDIT_FULL_TEXT -> executeEditFullText(toolId, bookId, params)
+
             ToolId.RERECORD_CLAUSE_AUDIO -> executeRerecordClause(toolId, bookId, params)
 
             ToolId.ERASE_CLAUSE -> {
@@ -237,6 +239,17 @@ class ToolBus @JvmOverloads constructor(
             toolName = toolId.toolName,
         ) ?: return ToolResult.Error(toolId, "Book not found: $bookId")
         return ToolResult.Success(toolId, book = updated)
+    }
+
+    private fun executeEditFullText(toolId: ToolId, bookId: String, params: Map<String, Any?>): ToolResult {
+        val fullText = strParam(params, "fullText", "full_text", "text")
+            ?: return ToolResult.Error(toolId, "Missing required parameter: fullText")
+        val existing = repo.getBook(bookId) ?: return ToolResult.Error(toolId, "Book not found: $bookId")
+        val title = strParam(params, "title", "newTitle") ?: existing.title
+        val res = repo.applyFullTextEdit(bookId, title, fullText)
+            ?: return ToolResult.Error(toolId, "Book not found: $bookId")
+        val (updated, changed) = res
+        return ToolResult.Success(toolId, data = mapOf("changed" to changed), book = updated)
     }
 
     private fun executeRerecordClause(toolId: ToolId, bookId: String, params: Map<String, Any?>): ToolResult {
@@ -474,7 +487,7 @@ class ToolBus @JvmOverloads constructor(
 
     companion object {
         private val MUTATING_BOOK_TOOLS = setOf(
-            ToolId.APPEND_CLAUSE, ToolId.INSERT_CLAUSE_AFTER, ToolId.REPLACE_SPAN,
+            ToolId.APPEND_CLAUSE, ToolId.INSERT_CLAUSE_AFTER, ToolId.REPLACE_SPAN, ToolId.EDIT_FULL_TEXT,
             ToolId.RERECORD_CLAUSE_AUDIO, ToolId.ERASE_CLAUSE, ToolId.TOGGLE_PARAGRAPH_BREAK,
             ToolId.RESTORE_HISTORY_SNAPSHOT, ToolId.ANNOTATE_SOFT_SUGGESTION,
             ToolId.UPDATE_BOOK_BIBLE, ToolId.ATTACH_PAGE_ILLUSTRATION, ToolId.SELECT_PAGE_ILLUSTRATION,

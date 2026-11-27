@@ -53,6 +53,37 @@ class TimeMachineStore(private val booksDir: File) {
         return curFp != snapFp
     }
 
+    internal fun buildRestoredBook(book: StoryBook, snap: TimeMachineSnapshot): StoryBook {
+        val mergedIllustrations = (book.illustrations + snap.illustrations).distinctBy { it.id }
+        val restoredActiveIds = snap.activeIllustrationIds.toMutableMap()
+        for (ill in mergedIllustrations) {
+            if (!restoredActiveIds.containsKey(ill.pageIndex)) {
+                restoredActiveIds[ill.pageIndex] = ""
+            }
+        }
+        return book.copy(
+            clauses = snap.clauses,
+            takes = (book.takes + snap.takes).distinctBy { it.id },
+            illustrations = mergedIllustrations,
+            activeIllustrationIds = restoredActiveIds,
+            updatedAtMs = System.currentTimeMillis(),
+        )
+    }
+
+    internal fun buildClauseRestoredBook(book: StoryBook, snap: TimeMachineSnapshot, clauseId: String): StoryBook? {
+        val targetClause = snap.clauses.firstOrNull { it.id == clauseId } ?: return null
+        val neededTake = targetClause.audioSpan?.takeId?.let { tid -> snap.takes.firstOrNull { it.id == tid } }
+        val nextTakes = if (neededTake != null && book.takes.none { it.id == neededTake.id }) book.takes + neededTake else book.takes
+        val list = book.clauses.toMutableList()
+        val curIdx = list.indexOfFirst { it.id == clauseId }
+        if (curIdx >= 0) {
+            list[curIdx] = targetClause
+        } else {
+            list.add(snap.clauses.indexOfFirst { it.id == clauseId }.coerceIn(0, list.size), targetClause)
+        }
+        return book.copy(clauses = list, takes = nextTakes, updatedAtMs = System.currentTimeMillis())
+    }
+
     fun recordSnapshot(
         book: StoryBook,
         actionLabel: String,

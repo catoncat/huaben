@@ -1,5 +1,6 @@
 package com.luna.storynote.storage
 
+import com.luna.storynote.literacy.FullTextAudioAligner
 import com.luna.storynote.literacy.StoryBookFormatter
 import com.luna.storynote.model.AudioTake
 import com.luna.storynote.model.BookIllustration
@@ -327,6 +328,43 @@ class StoryBookRepository(private val rootStorageDir: File) {
         replacementWord: String,
     ): StoryBook? = replaceRangeInClause(bookId, sentenceId, startIdx, endIdx, replacementWord)
 
+    fun applyFullTextEdit(
+        bookId: String,
+        newTitle: String,
+        newFullText: String,
+    ): Pair<StoryBook, Boolean>? = synchronized(lock) {
+        val folder = resolveBookFolder(bookId) ?: return null
+        val book = readBookUnlocked(folder) ?: return null
+        val reconciled = FullTextAudioAligner.reconcileBook(book, newTitle, newFullText)
+        if (!reconciled.hasMeaningfulChange) {
+            return@synchronized Pair(book, false)
+        }
+
+        val summary = buildString {
+            val titleDiff = reconciled.title != book.title
+            if (titleDiff) append("书名改为《${reconciled.title}》")
+            if (reconciled.clauses != book.clauses) {
+                if (isNotEmpty()) append(" · ")
+                append("原 ${book.clauses.size} 句 → ${reconciled.clauses.size} 句")
+            }
+        }
+        timeMachine.recordSnapshot(
+            book = book,
+            actionLabel = "全文校对",
+            toolName = "edit_full_text",
+            changeSummary = summary,
+        )
+
+        val updated = book.copy(
+            title = reconciled.title,
+            titleAudioFileName = reconciled.titleAudioFileName,
+            clauses = reconciled.clauses,
+            updatedAtMs = System.currentTimeMillis(),
+        )
+        saveBookUnlocked(updated)
+        Pair(updated, true)
+    }
+
     fun removeClause(bookId: String, clauseId: String): Pair<StoryBook, Clause?>? = synchronized(lock) {
         val folder = resolveBookFolder(bookId) ?: return null
         val book = readBookUnlocked(folder) ?: return null
@@ -395,29 +433,14 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val folder = resolveBookFolder(bookId) ?: return null
         val book = readBookUnlocked(folder) ?: return null
         val snap = timeMachine.getSnapshot(bookId, snapshotId) ?: return null
-        if (!timeMachine.hasMeaningfulDifference(book, snap)) {
-            return book
-        }
+        if (!timeMachine.hasMeaningfulDifference(book, snap)) return book
         timeMachine.recordSnapshot(
             book = book,
             actionLabel = "恢复版本前",
             toolName = "restore_history_snapshot",
             changeSummary = "回到「${snap.actionLabel}」之前的书本状态",
         )
-        val mergedIllustrations = (book.illustrations + snap.illustrations).distinctBy { it.id }
-        val restoredActiveIds = snap.activeIllustrationIds.toMutableMap()
-        for (ill in mergedIllustrations) {
-            if (!restoredActiveIds.containsKey(ill.pageIndex)) {
-                restoredActiveIds[ill.pageIndex] = ""
-            }
-        }
-        val updated = book.copy(
-            clauses = snap.clauses,
-            takes = (book.takes + snap.takes).distinctBy { it.id },
-            illustrations = mergedIllustrations,
-            activeIllustrationIds = restoredActiveIds,
-            updatedAtMs = System.currentTimeMillis(),
-        )
+        val updated = timeMachine.buildRestoredBook(book, snap)
         saveBookUnlocked(updated)
         updated
     }
@@ -428,10 +451,7 @@ class StoryBookRepository(private val rootStorageDir: File) {
         val snap = timeMachine.getSnapshot(bookId, snapshotId) ?: return null
         val targetClause = snap.clauses.firstOrNull { it.id == clauseId } ?: return null
         val currentClause = book.clauses.firstOrNull { it.id == clauseId }
-        if (currentClause != null && currentClause.text == targetClause.text && currentClause.audioSpan == targetClause.audioSpan) {
-            return book
-        }
-
+        if (currentClause != null && currentClause.text == targetClause.text && currentClause.audioSpan == targetClause.audioSpan) return book
         timeMachine.recordSnapshot(
             book = book,
             actionLabel = "恢复单句前",
@@ -439,20 +459,7 @@ class StoryBookRepository(private val rootStorageDir: File) {
             changeSummary = currentClause?.let { "恢复前：「${it.text}」" } ?: "找回已删句：「${targetClause.text}」",
             focusClauseId = clauseId,
         )
-        val neededTake = targetClause.audioSpan?.takeId?.let { tid -> snap.takes.firstOrNull { it.id == tid } }
-        val nextTakes = if (neededTake != null && book.takes.none { it.id == neededTake.id }) {
-            book.takes + neededTake
-        } else {
-            book.takes
-        }
-        val list = book.clauses.toMutableList()
-        val curIdx = list.indexOfFirst { it.id == clauseId }
-        if (curIdx >= 0) {
-            list[curIdx] = targetClause
-        } else {
-            list.add(snap.clauses.indexOfFirst { it.id == clauseId }.coerceIn(0, list.size), targetClause)
-        }
-        val updated = book.copy(clauses = list, takes = nextTakes, updatedAtMs = System.currentTimeMillis())
+        val updated = timeMachine.buildClauseRestoredBook(book, snap, clauseId) ?: return null
         saveBookUnlocked(updated)
         updated
     }
